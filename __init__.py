@@ -1,5 +1,5 @@
 """
-Copyright 2022 Sketchfab
+Copyright 2025 Sketchfab / Icosa Foundation
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -16,6 +16,7 @@ limitations under the License.
 
 import os
 import urllib
+import urllib.parse
 import requests
 import threading
 import time
@@ -35,18 +36,18 @@ from bpy.props import (StringProperty,
                        PointerProperty)
 
 bl_info = {
-    'name': 'Sketchfab Plugin',
-    'description': 'Browse and download free Sketchfab downloadable models',
-    'author': 'Sketchfab',
+    'name': 'Icosa Gallery Plugin',
+    'description': 'Browse and download models from the Icosa Gallery',
+    'author': 'Icosa Foundation',
     'license': 'APACHE2',
     'deps': '',
     'version': (1, 6, 1),
     "blender": (2, 80, 0),
-    'location': 'View3D > Tools > Sketchfab',
+    'location': 'View3D > Tools > Icosa Gallery',
     'warning': '',
-    'wiki_url': 'https://github.com/sketchfab/blender-plugin/releases',
-    'tracker_url': 'https://github.com/sketchfab/blender-plugin/issues',
-    'link': 'https://github.com/sketchfab/blender-plugin',
+    'wiki_url': 'https://github.com/icosa-foundation/icosa-blender-plugin/releases',
+    'tracker_url': 'https://github.com/icosa-foundation/icosa-blender-plugin/issues',
+    'link': 'https://github.com/icosa-foundation/icosa-blender-plugin',
     'support': 'COMMUNITY',
     'category': 'Import-Export'
 }
@@ -62,37 +63,39 @@ is_plugin_enabled = False
 
 class Config:
 
-    ADDON_NAME = 'io_sketchfab'
-    GITHUB_REPOSITORY_URL = 'https://github.com/sketchfab/blender-plugin'
-    GITHUB_REPOSITORY_API_URL = 'https://api.github.com/repos/sketchfab/blender-plugin'
-    SKETCHFAB_REPORT_URL = 'https://help.sketchfab.com/hc/en-us/requests/new?type=exporters&subject=Blender+Plugin'
+    ADDON_NAME = 'io_icosa_gallery'
+    GITHUB_REPOSITORY_URL = 'https://github.com/icosa-foundation/blender-plugin'
+    GITHUB_REPOSITORY_API_URL = 'https://api.github.com/repos/icosa-foundation/blender-plugin'
+    # CLIENTID = ''
+    ICOSA_URL = 'https://icosa.gallery'
+    ICOSA_GET_DEVICE_CODE = f'{ICOSA_URL}/device'
+    ICOSA_EMAIL_AUTH = f'{ICOSA_URL}/login'  # Not currently used
+    ICOSA_SIGNUP = f'{ICOSA_URL}/register'
+    ICOSA_REPORT_URL = f'{ICOSA_URL}/contact'
 
-    SKETCHFAB_URL = 'https://sketchfab.com'
-    CLIENTID = 'hGC7unF4BHyEB0s7Orz5E1mBd3LluEG0ILBiZvF9'
-    SKETCHFAB_OAUTH = SKETCHFAB_URL + '/oauth2/token/'
-    SKETCHFAB_API = 'https://api.sketchfab.com'
-    SKETCHFAB_SEARCH = SKETCHFAB_API + '/v3/search'
-    SKETCHFAB_MODEL = SKETCHFAB_API + '/v3/models'
-    SKETCHFAB_ORGS = SKETCHFAB_API + '/v3/orgs'
-    SKETCHFAB_SIGNUP = 'https://sketchfab.com/signup'
+    ICOSA_API = 'https://api.icosa.gallery/v1'
 
-    BASE_SEARCH = SKETCHFAB_SEARCH + '?type=models&downloadable=true'
-    DEFAULT_FLAGS = '&staffpicked=true&sort_by=-staffpickedAt'
-    DEFAULT_SEARCH = SKETCHFAB_SEARCH + \
-                     '?type=models&downloadable=true' + DEFAULT_FLAGS
+    ICOSA_MODEL = f'{ICOSA_API}/assets'
+    ICOSA_DEVICE_AUTH = f'{ICOSA_API}/login/device_login'
 
-    SKETCHFAB_ME = '{}/v3/me'.format(SKETCHFAB_API)
-    BASE_SEARCH_OWN_MODELS = SKETCHFAB_ME + '/search?type=models&downloadable=true'
-    PURCHASED_MODELS = SKETCHFAB_ME + "/models/purchases?type=models"
+    ICOSA_ME = f'{ICOSA_API}/v1/users/me'
+    BASE_SEARCH_OWN_MODELS = f'{ICOSA_ME}/assets?'
 
-    SKETCHFAB_PLUGIN_VERSION = '{}/releases'.format(GITHUB_REPOSITORY_API_URL)
+    ICOSA_SEARCH = f'{ICOSA_API}/assets'
+    BASE_SEARCH = f'{ICOSA_SEARCH}?'
+    DEFAULT_FLAGS = f''
+    DEFAULT_SEARCH = f'{BASE_SEARCH}{DEFAULT_FLAGS}'
+
+    # PURCHASED_MODELS = ICOSA_ME + "/models/purchases?type=models"
+
+    ICOSA_PLUGIN_VERSION = '{}/releases'.format(GITHUB_REPOSITORY_API_URL)
 
     # Those will be set during plugin initialization, or upon setting a new cache directory
-    SKETCHFAB_TEMP_DIR = ""
-    SKETCHFAB_THUMB_DIR = ""
-    SKETCHFAB_MODEL_DIR = ""
+    ICOSA_TEMP_DIR = ""
+    ICOSA_THUMB_DIR = ""
+    ICOSA_MODEL_DIR = ""
 
-    SKETCHFAB_CATEGORIES = (('ALL', 'All categories', 'All categories'),
+    ICOSA_CATEGORIES = (('ALL', 'All categories', 'All categories'),
                             ('animals-pets', 'Animals & Pets', 'Animals and Pets'),
                             ('architecture', 'Architecture', 'Architecture'),
                             ('art-abstract', 'Art & Abstract', 'Art & Abstract'),
@@ -112,29 +115,25 @@ class Config:
                             ('sports-fitness', 'Sports & Fitness', 'Sports & Fitness'),
                             ('weapons-military', 'Weapons & Military', 'Weapons & Military'))
 
-    SKETCHFAB_FACECOUNT = (('ANY', "All", ""),
+    ICOSA_FACECOUNT = (('ANY', "All", ""),
                            ('10K', "Up to 10k", ""),
                            ('50K', "10k to 50k", ""),
                            ('100K', "50k to 100k", ""),
                            ('250K', "100k to 250k", ""),
                            ('250KP', "250k +", ""))
 
-    SKETCHFAB_SORT_BY = (('RELEVANCE', "Relevance", ""),
+    ICOSA_SORT_BY = (('RELEVANCE', "Relevance", ""),
                          ('LIKES', "Likes", ""),
                          ('VIEWS', "Views", ""),
                          ('RECENT', "Recent", ""))
 
-    SKETCHFAB_SEARCH_DOMAIN = (('DEFAULT', "All site", "", 0),
-                               ('OWN', "Own Models (PRO)", "", 1),
-                               ('STORE', "Store purchases", "", 2))
+    ICOSA_SEARCH_DOMAIN = (('DEFAULT', "All site", "", 0),
+                               ('OWN', "Own Models", "", 1))
 
     MAX_THUMBNAIL_HEIGHT = 256
 
-    SKETCHFAB_UPLOAD_LIMITS = {
-        "basic" : 100 * 1024 * 1024,
-        "pro": 200 * 1024 * 1024,
-        "prem": 500 * 1024 * 1024,
-        "ent": 500 * 1024 * 1024
+    ICOSA_UPLOAD_LIMITS = {
+        "basic": 100 * 1024 * 1024,
     }
 
 class Utils:
@@ -169,25 +168,22 @@ class Utils:
         readable = round(readable, 2)
         return '{}{}'.format(readable, suffix)
 
-    def build_download_url(uid, use_org_profile=False, active_org=None):
-        if use_org_profile:
-            return '{}/{}/models/{}/download'.format(Config.SKETCHFAB_ORGS, active_org["uid"], uid)
-        else:
-            return '{}/{}/download'.format(Config.SKETCHFAB_MODEL, uid)
+    def build_download_url(uid):
+        return '{}/{}/download'.format(Config.ICOSA_MODEL, uid)
 
     def thumbnail_file_exists(uid):
-        return os.path.exists(os.path.join(Config.SKETCHFAB_THUMB_DIR, '{}.jpeg'.format(uid)))
+        return os.path.exists(os.path.join(Config.ICOSA_THUMB_DIR, '{}.jpeg'.format(uid)))
 
     def clean_thumbnail_directory():
-        if not os.path.exists(Config.SKETCHFAB_THUMB_DIR):
+        if not os.path.exists(Config.ICOSA_THUMB_DIR):
             return
 
         from os import listdir
-        for file in listdir(Config.SKETCHFAB_THUMB_DIR):
-            os.remove(os.path.join(Config.SKETCHFAB_THUMB_DIR, file))
+        for file in listdir(Config.ICOSA_THUMB_DIR):
+            os.remove(os.path.join(Config.ICOSA_THUMB_DIR, file))
 
     def clean_downloaded_model_dir(uid):
-        shutil.rmtree(os.path.join(Config.SKETCHFAB_MODEL_DIR, uid))
+        shutil.rmtree(os.path.join(Config.ICOSA_MODEL_DIR, uid))
 
     def get_thumbnail_url(thumbnails_json):
         min_height  = 1e6
@@ -208,15 +204,15 @@ class Utils:
         return best_thumbnail
 
     def setup_plugin():
-        if not os.path.exists(Config.SKETCHFAB_THUMB_DIR):
-            os.makedirs(Config.SKETCHFAB_THUMB_DIR)
+        if not os.path.exists(Config.ICOSA_THUMB_DIR):
+            os.makedirs(Config.ICOSA_THUMB_DIR)
 
     def get_uid_from_thumbnail_url(thumbnail_url):
         return thumbnail_url.split('/')[4]
 
-    def get_uid_from_model_url(model_url, use_org_profile=False):
+    def get_uid_from_model_url(model_url):
         try:
-            return model_url.split('/')[7] if use_org_profile else model_url.split('/')[5]
+            return model_url.split('/')[5]
         except:
             ShowMessage("ERROR", "Url parsing error", "Error getting uid from url: {}".format(model_url))
             return None
@@ -281,16 +277,16 @@ class Utils:
             return False
 
 class Cache:
-    SKETCHFAB_CACHE_FILE = os.path.join(
-        bpy.utils.user_resource("SCRIPTS", path="sketchfab_cache", create=True),
+    ICOSA_CACHE_FILE = os.path.join(
+        bpy.utils.user_resource("SCRIPTS", path="icosa_cache", create=True),
         ".cache"
     ) # Use a user path to avoid permission-related errors
 
     def read():
-        if not os.path.exists(Cache.SKETCHFAB_CACHE_FILE):
+        if not os.path.exists(Cache.ICOSA_CACHE_FILE):
             return {}
 
-        with open(Cache.SKETCHFAB_CACHE_FILE, 'rb') as f:
+        with open(Cache.ICOSA_CACHE_FILE, 'rb') as f:
             data = f.read().decode('utf-8')
             return json.loads(data)
 
@@ -302,7 +298,7 @@ class Cache:
     def save_key(key, value):
         cache_data = Cache.read()
         cache_data[key] = value
-        with open(Cache.SKETCHFAB_CACHE_FILE, 'wb+') as f:
+        with open(Cache.ICOSA_CACHE_FILE, 'wb+') as f:
             f.write(json.dumps(cache_data).encode('utf-8'))
 
     def delete_key(key):
@@ -310,30 +306,33 @@ class Cache:
         if key in cache_data:
             del cache_data[key]
 
-        with open(Cache.SKETCHFAB_CACHE_FILE, 'wb+') as f:
+        with open(Cache.ICOSA_CACHE_FILE, 'wb+') as f:
             f.write(json.dumps(cache_data).encode('utf-8'))
 
 
 # helpers
-def get_sketchfab_login_props():
-    return bpy.context.window_manager.sketchfab_api
+def get_icosa_login_props():
+    return bpy.context.window_manager.icosa_api
 
 
-def get_sketchfab_props():
-    return bpy.context.window_manager.sketchfab_browser
+def get_icosa_props():
+    return bpy.context.window_manager.icosa_browser
 
 
-def get_sketchfab_props_proxy():
-    return bpy.context.window_manager.sketchfab_browser_proxy
+def get_icosa_props_proxy():
+    return bpy.context.window_manager.icosa_browser_proxy
 
-def get_sketchfab_model(uid):
-    skfb = get_sketchfab_props()
+def get_icosa_model(uid):
+    skfb = get_icosa_props()
     if "current" in skfb.search_results and uid in skfb.search_results["current"]:
         return skfb.search_results['current'][uid]
     else:
         return None
 
 def run_default_search():
+    print("-----------------------------------------")
+    print(Config.DEFAULT_SEARCH)
+    print("-----------------------------------------")
     searchthr = GetRequestThread(Config.DEFAULT_SEARCH, parse_results)
     searchthr.start()
 
@@ -344,11 +343,11 @@ def get_plugin_enabled():
 
 
 def refresh_search(self, context):
-    pprops = get_sketchfab_props_proxy()
+    pprops = get_icosa_props_proxy()
     if pprops.is_refreshing:
         return
 
-    props = get_sketchfab_props()
+    props = get_icosa_props()
 
     if pprops.search_domain != props.search_domain:
         props.search_domain = pprops.search_domain
@@ -364,34 +363,29 @@ def refresh_search(self, context):
     props.staffpick = pprops.staffpick
     props.categories = pprops.categories
     props.face_count = pprops.face_count
-    bpy.ops.wm.sketchfab_search('EXEC_DEFAULT')
+    bpy.ops.wm.icosa_search('EXEC_DEFAULT')
 
 
 def set_login_status(status_type, status):
-    login_props = get_sketchfab_login_props()
+    login_props = get_icosa_login_props()
     login_props.status = status
     login_props.status_type = status_type
 
 
 def set_import_status(status):
-    props = get_sketchfab_props()
+    props = get_icosa_props()
     props.import_status = status
 
 
-class SketchfabApi:
+class IcosaApi:
     def __init__(self):
         self.access_token = ''
         self.api_token = ''
         self.headers = {}
         self.username = ''
         self.display_name = ''
-        self.plan_type = ''
         self.next_results_url = None
         self.prev_results_url = None
-        self.user_orgs = []
-        self.user_has_orgs = False
-        self.active_org = None
-        self.use_org_profile = False
 
     def build_headers(self):
         if self.access_token:
@@ -411,9 +405,6 @@ class SketchfabApi:
 
         return False
 
-    def is_user_pro(self):
-        return len(self.plan_type) and self.plan_type not in ['basic', 'plus']
-
     def logout(self):
         self.access_token = ''
         self.api_token = ''
@@ -423,119 +414,35 @@ class SketchfabApi:
         Cache.delete_key('api_token')
         Cache.delete_key('key')
 
-        props = get_sketchfab_props()
+        props = get_icosa_props()
         #props.search_domain = "DEFAULT"
         if 'current' in props.search_results:
             del props.search_results['current']
-        pprops = get_sketchfab_props_proxy()
+        pprops = get_icosa_props_proxy()
         #pprops.search_domain = "DEFAULT"
 
-        self.user_orgs = []
-        self.user_has_orgs = False
-        self.active_org = None
-        self.use_org_profile = False
-        props.use_org_profile = False
-        pprops.use_org_profile = False
-
-        bpy.ops.wm.sketchfab_search('EXEC_DEFAULT')
+        bpy.ops.wm.icosa_search('EXEC_DEFAULT')
 
     def request_user_info(self):
-        requests.get(Config.SKETCHFAB_ME, headers=self.headers, hooks={'response': self.parse_user_info})
+        requests.get(Config.ICOSA_ME, headers=self.headers, hooks={'response': self.parse_user_info})
 
     def get_user_info(self):
-        if self.display_name and self.plan_type:
-            return '{} ({})'.format(self.display_name, self.plan_type)
+        if self.display_name:
+            return '{}'.format(self.display_name)
         else:
             return ('', '')
 
     def parse_user_info(self, r, *args, **kargs):
         if r.status_code == 200:
             user_data = r.json()
-            self.username = user_data['username']
+            self.username = user_data['email']
             self.display_name = user_data['displayName']
-            self.plan_type = user_data['account']
-            requests.get(Config.SKETCHFAB_ME + "/orgs", headers=self.headers, hooks={'response': self.on_user_orgs_check})
         else:
-            print('\nInvalid access or API token\nYou can get your API token here:\nhttps://sketchfab.com/settings/password\n')
-            set_login_status('ERROR', 'Failed to authenticate')
-            ShowMessage("ERROR", "Failed to authenticate", "Invalid access or API token")
+            set_login_status('ERROR', 'Not logged in')
+            ShowMessage("ERROR", "Failed to authenticate", f"{r.status_code} - {r.text}")
             self.access_token = ''
             self.api_token = ''
             self.headers = {}
-
-    def request_user_orgs(self):
-        if not self.active_org:
-            requests.get(Config.SKETCHFAB_ME + "/orgs", headers=self.headers, hooks={'response': self.parse_orgs_info})
-            pass
-
-    def on_user_orgs_check(self, r, *args, **kargs):
-        self.user_has_orgs = bool((r.status_code == 200) and len(r.json().get("results", [])))
-
-    def parse_orgs_info(self, r, *args, **kargs):
-        """
-        Get and store information about user's orgs, and its orgs projects
-        """
-        if r.status_code == 200:
-            orgs_data = r.json()
-
-            # Get a list of the user's orgs
-            for org in orgs_data["results"]:
-                self.user_orgs.append({
-                    "uid":         org["uid"],
-                    "displayName": org["displayName"],
-                    "username":    org["username"],
-                    "url":         org["publicProfileUrl"],
-                    "projects":    [],
-                })
-            self.user_orgs.sort(key = lambda x : x["displayName"])
-
-            # Iterate on the orgs to get lists of their projects
-            for org in self.user_orgs:
-
-                # Create the callback inline to keep a reference to the org uid
-                def parse_projects_info(r, *args, **kargs):
-                    """
-                    Get and store information about an org projects
-                    """
-                    if r.status_code == 200:
-                        projects_data = r.json()
-                        projects = projects_data["results"]
-                        # Add the projects to the orgs dict object
-                        for proj in projects:
-                            org_uid = proj["org"]["uid"]
-                            org = next((x for x in self.user_orgs if x["uid"] == org_uid))
-                            org["projects"].append({
-                                "uid":         proj["uid"],
-                                "name":        proj["name"],
-                                "slug":        proj["slug"],
-                                "modelCount":  proj["modelCount"],
-                                "memberCount": proj["memberCount"],
-                            })
-                        org["projects"].sort(key = lambda x : x["name"])
-
-                        # Iterate on all projects (not just the 24 first)
-                        if projects_data["next"] is not None:
-                            requests.get(
-                                projects_data["next"],
-                                headers=self.headers,
-                                hooks={'response': parse_projects_info}
-                            )
-
-                    else:
-                        print('Can not get projects info')
-
-                requests.get("%s/%s/projects" % (Config.SKETCHFAB_ORGS, org["uid"]),
-                    headers=self.headers,
-                    hooks={'response': parse_projects_info})
-
-            # Set the first org as active
-            if len(self.user_orgs):
-                self.active_org = self.user_orgs[0]
-                self.user_has_orgs = True
-
-            # Iterate on all orgs (not just the 24 first)
-            if orgs_data["next"] is not None:
-                requests.get(orgs_data["next"], headers=self.headers, hooks={'response': self.parse_orgs_info})
 
     def request_thumbnail(self, thumbnails_json, model_uid):
         # Avoid requesting twice the same data
@@ -547,16 +454,14 @@ class SketchfabApi:
 
     def request_model_info(self, uid, callback=None):
         callback = self.handle_model_info if callback is None else callback
-        url = Config.SKETCHFAB_MODEL + '/' + uid
-        if self.use_org_profile and self.active_org.get("uid"):
-            url = Config.SKETCHFAB_ORGS + "/" + self.active_org["uid"] + "/models/" + uid
+        url = Config.ICOSA_MODEL + '/' + uid
 
         model_infothr = GetRequestThread(url, callback, self.headers)
         model_infothr.start()
 
     def handle_model_info(self, r, *args, **kwargs):
-        skfb = get_sketchfab_props()
-        uid = Utils.get_uid_from_model_url(r.url, self.use_org_profile)
+        skfb = get_icosa_props()
+        uid = Utils.get_uid_from_model_url(r.url)
 
         # Dirty fix to avoid processing obsolete result data
         if 'current' not in skfb.search_results or uid is None or uid not in skfb.search_results['current']:
@@ -572,16 +477,10 @@ class SketchfabApi:
         skfb.search_results['current'][uid] = model
 
     def search(self, query, search_cb):
-        skfb = get_sketchfab_props()
+        skfb = get_icosa_props()
         url = Config.BASE_SEARCH
         if skfb.search_domain == "OWN":
             url = Config.BASE_SEARCH_OWN_MODELS
-        elif skfb.search_domain == "STORE":
-            url = Config.PURCHASED_MODELS
-        elif skfb.search_domain == "ACTIVE_ORG":
-            url = Config.SKETCHFAB_ORGS + "/%s/models?isArchivesReady=true" % self.active_org["uid"]
-        elif len(skfb.search_domain) == 32:
-            url = Config.SKETCHFAB_ORGS + "/%s/models?isArchivesReady=true&projects=%s" % (self.active_org["uid"], skfb.search_domain)
 
         search_query = '{}{}'.format(url, query)
         if search_query not in ongoingSearches:
@@ -603,7 +502,7 @@ class SketchfabApi:
                 with open(downloadHistory, 'a+') as f:
                     if createFile:
                         f.write("Model name, Author name, Author url, License, Model link,\n")
-                    f.write("{}, {}, https://sketchfab.com/{}, {}, https://sketchfab.com/models/{},\n".format(
+                    f.write("{}, {}, https://icosa.gallery/{}, {}, https://icosa.gallery/models/{},\n".format(
                         title.replace(",", " "),
                         author.replace(",", " "),
                         authorUrl.replace(",", " "),
@@ -629,7 +528,7 @@ class SketchfabApi:
             print("Error encountered while parsing model info request: {}".format(r.url))
 
     def download_model(self, uid):
-        skfb_model = get_sketchfab_model(uid)
+        skfb_model = get_icosa_model(uid)
         if skfb_model is not None: # The model comes from the search results
             if skfb_model.download_url and (time.time() - skfb_model.time_url_requested < skfb_model.url_expires):
                 self.get_archive(skfb_model.download_url)
@@ -638,37 +537,11 @@ class SketchfabApi:
                 skfb_model.url_expires = None
                 skfb_model.time_url_requested = None
                 self.write_model_info(skfb_model.title, skfb_model.author, skfb_model.username, skfb_model.license, uid)
-                requests.get(Utils.build_download_url(uid, self.use_org_profile, self.active_org), headers=self.headers, hooks={'response': self.handle_download})
+                requests.get(Utils.build_download_url(uid), headers=self.headers, hooks={'response': self.handle_download})
         else: # Model comes from a direct link
-            skfb = get_sketchfab_props()
-            download_url = ""
-
-            # If the model is in an org, find if the user has access to it
-            if "/orgs/" in skfb.manualImportPath:
-                try:
-                    orgName = skfb.manualImportPath.split("/orgs/")[1].split("/")[0]
-                    if skfb.skfb_api.user_has_orgs and not skfb.skfb_api.active_org:
-                        skfb.skfb_api.request_user_orgs()
-
-                    user_orgs = skfb.skfb_api.user_orgs
-                    orgUid = ""
-                    for org in user_orgs:
-                        if org["username"] == orgName:
-                            orgUid = org["uid"]
-                            break
-                    if orgUid:
-                        download_url = '{}/{}/models/{}/download'.format(Config.SKETCHFAB_ORGS, orgUid, uid)
-                    else:
-                        ShowMessage("ERROR", "User not in Organization", "User does not appear to belong to org %s" % (orgName))
-                        return
-                except:
-                    ShowMessage("ERROR", "Invalid url", "Cannot parse org name from url %s" % skfb.manualImportPath)
-                    return
-            # Otherwise, request a direct download and get model info
-            else:
-                download_url = Utils.build_download_url(uid)
-                requests.get('{}/{}'.format(Config.SKETCHFAB_MODEL, uid), headers=skfb.skfb_api.headers, hooks={'response': self.parse_model_info_request})
-
+            skfb = get_icosa_props()
+            download_url = Utils.build_download_url(uid)
+            requests.get('{}/{}'.format(Config.ICOSA_MODEL, uid), headers=skfb.skfb_api.headers, hooks={'response': self.parse_model_info_request})
             requests.get(download_url, headers=self.headers, hooks={'response': self.handle_download})
 
     def handle_download(self, r, *args, **kwargs):
@@ -676,19 +549,19 @@ class SketchfabApi:
             ShowMessage("ERROR", "This model is not downloadable", "Make sure your account has enough rights to download the model")
             return
 
-        skfb = get_sketchfab_props()
-        uid = Utils.get_uid_from_model_url(r.url, self.use_org_profile)
+        skfb = get_icosa_props()
+        uid = Utils.get_uid_from_model_url(r.url)
         if uid is None:
             return
 
         gltf = r.json()['gltf']
-        skfb_model = get_sketchfab_model(uid)
+        skfb_model = get_icosa_model(uid)
 
         # If the model name is not known at this step, we could try to do an additional API call to get it
         # This can happen when the user chose to import a model from its url
-        # However this adds an additional call and a bit of complexity for org models (need additional parsing),
-        # so for a simple hotfix models imported this way will be called "Sketchfab model"
-        self.get_archive(gltf['url'], skfb_model.title if skfb_model else "Sketchfab Model")
+        # However this adds an additional call,
+        # so for a simple hotfix models imported this way will be called "Icosa Gallery model"
+        self.get_archive(gltf['url'], skfb_model.title if skfb_model else "Icosa Gallery Model")
 
     def get_archive(self, url, title):
         if url is None:
@@ -697,7 +570,7 @@ class SketchfabApi:
 
         r = requests.get(url, stream=True)
         uid = Utils.get_uid_from_download_url(url)
-        temp_dir = os.path.join(Config.SKETCHFAB_MODEL_DIR, uid)
+        temp_dir = os.path.join(Config.ICOSA_MODEL_DIR, uid)
         if not os.path.exists(temp_dir):
             os.makedirs(temp_dir)
 
@@ -733,11 +606,11 @@ class SketchfabApi:
                 print(traceback.format_exc())
         else:
             ShowMessage("ERROR", "Download error", "Failed to download model (url might be invalid)")
-            model = get_sketchfab_model(uid)
+            model = get_icosa_model(uid)
             set_import_status("Import model ({})".format(model.download_size if model.download_size else 'fetching data'))
         return
 
-class SketchfabLoginProps(bpy.types.PropertyGroup):
+class IcosaLoginProps(bpy.types.PropertyGroup):
     def update_tr(self, context):
         self.status = ''
         if self.email != self.last_username or self.password != self.last_password:
@@ -745,28 +618,40 @@ class SketchfabLoginProps(bpy.types.PropertyGroup):
             self.last_password = self.password
             if not self.password:
                 set_login_status('ERROR', 'Password is empty')
-            bpy.ops.wm.sketchfab_login('EXEC_DEFAULT')
+            bpy.ops.wm.icosa_login('EXEC_DEFAULT')
 
 
-    email : StringProperty(
+    email: StringProperty(
         name="email",
         description="User email",
         default=""
     )
 
-    api_token : StringProperty(
+    api_token: StringProperty(
         name="API Token",
         description="User API Token",
         default=""
     )
 
-    use_mail : BoolProperty(
+    device_code: StringProperty(
+        name="Device Code",
+        description="User Device Code",
+        default=""
+    )
+
+    use_mail: BoolProperty(
             name="Use mail / password",
             description="Use mail/password login or API Token",
+            default=False,
+    )
+
+    use_device_code: BoolProperty(
+            name="Use device code",
+            description="Use device code login or API Token",
             default=True,
     )
 
-    password : StringProperty(
+    password: StringProperty(
         name="password",
         description="User password",
         subtype='PASSWORD',
@@ -774,15 +659,15 @@ class SketchfabLoginProps(bpy.types.PropertyGroup):
         update=update_tr
     )
 
-    access_token : StringProperty(
+    access_token: StringProperty(
             name="access_token",
             description="oauth access token",
             subtype='PASSWORD',
             default=""
             )
 
-    status : StringProperty(name='', default='')
-    status_type : EnumProperty(
+    status: StringProperty(name='', default='')
+    status_type: EnumProperty(
             name="Login status type",
             items=(('ERROR', "Error", ""),
                        ('INFO', "Information", ""),
@@ -791,81 +676,22 @@ class SketchfabLoginProps(bpy.types.PropertyGroup):
             default='FILE_REFRESH'
             )
 
-    last_username : StringProperty(default="default")
-    last_password : StringProperty(default="default")
+    last_username: StringProperty(default="default")
+    last_password: StringProperty(default="default")
 
-    skfb_api = SketchfabApi()
-
-def get_user_orgs(self, context):
-    api  = get_sketchfab_props().skfb_api
-    if not api.user_has_orgs:
-        api.request_user_orgs()
-    return [(org["uid"], org["displayName"], "") for org in api.user_orgs]
-
-def get_org_projects(self, context):
-    api  = get_sketchfab_props().skfb_api
-    return [(proj["uid"], proj["name"], proj["name"]) for proj in api.active_org["projects"]]
+    skfb_api = IcosaApi()
 
 def get_available_search_domains(self, context):
-    api = get_sketchfab_props().skfb_api
-
-    search_domains = [domain for domain in Config.SKETCHFAB_SEARCH_DOMAIN]
-
-    if api.user_has_orgs and api.use_org_profile:
-        search_domains = [
-            ("ACTIVE_ORG", "Active Organization", api.active_org["displayName"], 0)
-        ]
-        for p in get_org_projects(self, context):
-            search_domains.append(p)
-
+    api = get_icosa_props().skfb_api
+    search_domains = [domain for domain in Config.ICOSA_SEARCH_DOMAIN]
     return tuple(search_domains)
 
-def refresh_orgs(self, context):
-
-    pprops = get_sketchfab_props_proxy()
-    if pprops.is_refreshing:
-        return
-
-    props = get_sketchfab_props()
-    api   = props.skfb_api
-
-    api.use_org_profile = pprops.use_org_profile
-
-    if api.user_has_orgs and not api.active_org :
-        bpy.context.window.cursor_set("WAIT")
-        api.request_user_orgs()
-        bpy.context.window.cursor_set("DEFAULT")
-
-    orgs = [org for org in api.user_orgs if org["uid"] == pprops.active_org]
-    api.active_org = orgs[0] if len(orgs) else None
-
-    if pprops.use_org_profile != props.use_org_profile:
-        props.use_org_profile = pprops.use_org_profile
-    if pprops.active_org != props.active_org:
-        props.active_org = pprops.active_org
-
-    if props.use_org_profile:
-        props.search_domain = "ACTIVE_ORG"
-        pprops.search_domain = "ACTIVE_ORG"
-    else:
-        props.search_domain = "DEFAULT"
-        pprops.search_domain = "DEFAULT"
-
-    refresh_search(self, context)
-
 def get_sorting_options(self, context):
-    api = get_sketchfab_props().skfb_api
-    if api.user_has_orgs and api.use_org_profile:
-        return (
-            ('RELEVANCE', "Relevance", ""),
-            ('RECENT', "Recent", "")
-        )
-    else:
-        return Config.SKETCHFAB_SORT_BY
+    return Config.ICOSA_SORT_BY
 
-class SketchfabBrowserPropsProxy(bpy.types.PropertyGroup):
+class IcosaBrowserPropsProxy(bpy.types.PropertyGroup):
     # Search
-    query : StringProperty(
+    query: StringProperty(
             name="",
             update=refresh_search,
             description="Query to search",
@@ -873,50 +699,50 @@ class SketchfabBrowserPropsProxy(bpy.types.PropertyGroup):
             options={'SKIP_SAVE'}
             )
 
-    pbr : BoolProperty(
+    pbr: BoolProperty(
             name="PBR",
             description="Search for PBR model only",
             default=False,
             update=refresh_search,
             )
 
-    categories : EnumProperty(
+    categories: EnumProperty(
             name="Categories",
-            items=Config.SKETCHFAB_CATEGORIES,
+            items=Config.ICOSA_CATEGORIES,
             description="Show only models of category",
             default='ALL',
             update=refresh_search
             )
-    face_count : EnumProperty(
+    face_count: EnumProperty(
             name="Face Count",
-            items=Config.SKETCHFAB_FACECOUNT,
+            items=Config.ICOSA_FACECOUNT,
             description="Determines which meshes are exported",
             default='ANY',
             update=refresh_search
             )
 
-    sort_by : EnumProperty(
+    sort_by: EnumProperty(
             name="Sort by",
             items=get_sorting_options,
             description="Sort ",
             update=refresh_search,
             )
 
-    animated : BoolProperty(
+    animated: BoolProperty(
             name="Animated",
             description="Show only models with animation",
             default=False,
             update=refresh_search
             )
 
-    staffpick : BoolProperty(
+    staffpick: BoolProperty(
             name="Staffpick",
             description="Show only staffpick models",
             default=False,
             update=refresh_search
             )
 
-    search_domain : EnumProperty(
+    search_domain: EnumProperty(
             name="",
             items=get_available_search_domains,
             description="Search domain ",
@@ -924,127 +750,101 @@ class SketchfabBrowserPropsProxy(bpy.types.PropertyGroup):
             default=None
             )
 
-    use_org_profile : BoolProperty(
-        name="Use organisation profile",
-        description="Download/Upload as a member of an organization.\nSearch queries and uploads will be performed to\nthe organisation and project selected below",
-        default=False,
-        update=refresh_orgs
-    )
-
-    active_org : EnumProperty(
-        name="Org",
-        items=get_user_orgs,
-        description="Active org",
-        update=refresh_orgs
-    )
-
-    is_refreshing : BoolProperty(
+    is_refreshing: BoolProperty(
         name="Refresh",
         description="Refresh",
         default=False,
     )
-    expanded_filters : bpy.props.BoolProperty(default=False)
+    expanded_filters: bpy.props.BoolProperty(default=False)
 
-class SketchfabBrowserProps(bpy.types.PropertyGroup):
+class IcosaBrowserProps(bpy.types.PropertyGroup):
     # Search
-    query : StringProperty(
+    query: StringProperty(
             name="Search",
             description="Query to search",
             default=""
             )
 
-    pbr : BoolProperty(
+    pbr: BoolProperty(
             name="PBR",
             description="Search for PBR model only",
             default=False
             )
 
-    categories : EnumProperty(
+    categories: EnumProperty(
             name="Categories",
-            items=Config.SKETCHFAB_CATEGORIES,
+            items=Config.ICOSA_CATEGORIES,
             description="Show only models of category",
             default='ALL',
              )
 
-    face_count : EnumProperty(
+    face_count: EnumProperty(
             name="Face Count",
-            items=Config.SKETCHFAB_FACECOUNT,
+            items=Config.ICOSA_FACECOUNT,
             description="Determines which meshes are exported",
             default='ANY',
             )
 
-    sort_by : EnumProperty(
+    sort_by: EnumProperty(
             name="Sort by",
             items=get_sorting_options,
             description="Sort ",
             )
 
-    animated : BoolProperty(
+    animated: BoolProperty(
             name="Animated",
             description="Show only models with animation",
             default=False,
             )
 
-    staffpick : BoolProperty(
+    staffpick: BoolProperty(
             name="Staffpick",
             description="Show only staffpick models",
             default=False,
             )
 
-    search_domain : EnumProperty(
+    search_domain: EnumProperty(
             name="Search domain",
             items=get_available_search_domains,
             description="Search domain ",
             )
 
-    use_org_profile : BoolProperty(
-        name="Use organisation profile",
-        description="Import/Export as a member of an organization\nLOL",
-        default=False,
-    )
+    status: StringProperty(name='status', default='idle')
 
-    active_org : EnumProperty(
-        name="Org",
-        items=get_user_orgs,
-        description="Active org",
-    )
-
-    status : StringProperty(name='status', default='idle')
-
-    use_preview : BoolProperty(
+    use_preview: BoolProperty(
         name="Use Preview",
         description="Show results using preview widget instead of regular buttons with thumbnails as icons",
         default=True
         )
 
     search_results = {}
-    current_key : StringProperty(name='current', default='current')
-    has_searched_next : BoolProperty(name='next', default=False)
-    has_searched_prev : BoolProperty(name='prev', default=False)
+    current_key: StringProperty(name='current', default='current')
+    has_searched_next: BoolProperty(name='next', default=False)
+    has_searched_prev: BoolProperty(name='prev', default=False)
 
-    skfb_api = SketchfabLoginProps.skfb_api
+    skfb_api = IcosaLoginProps.skfb_api
     custom_icons = bpy.utils.previews.new()
-    has_loaded_thumbnails : BoolProperty(default=False)
+    has_loaded_thumbnails: BoolProperty(default=False)
 
-    is_latest_version : IntProperty(default=-1)
+    is_latest_version: IntProperty(default=-1)
 
-    import_status : StringProperty(name='import', default='')
+    import_status: StringProperty(name='import', default='')
 
-    manualImportBoolean : BoolProperty(
+    manualImportBoolean: BoolProperty(
             name="Import from url",
             description="Import a downloadable model from a url",
             default=False,
             )
-    manualImportPath : StringProperty(
+    manualImportPath: StringProperty(
             name="Url",
-            description="Paste full model url:\n* https://sketchfab.com/models/mymodel-XXXX\n* https://sketchfab.com/orgs/XXXX/3d-models/mymodel-YYYY",
+            description="Paste full model url:\n* https://icosa.gallery/view/5rf3YuZfJAW",
             default="",
             maxlen=1024,
             options={'TEXTEDIT_UPDATE'})
 
 
 def list_current_results(self, context):
-    skfb = get_sketchfab_props()
+    skfb = get_icosa_props()
 
     # No results:
     if 'current' not in skfb.search_results:
@@ -1085,7 +885,7 @@ def draw_model_info(layout, model, context):
 
     row = ui_model_props.row()
     row.label(text="{}".format(model.title), icon='OBJECT_DATA')
-    row.operator("wm.sketchfab_view", text="", icon='LINKED').model_uid = model.uid
+    row.operator("wm.icosa_view", text="", icon='LINKED').model_uid = model.uid
     
     ui_model_props.label(text='{}'.format(model.author), icon='ARMATURE_DATA')
 
@@ -1106,7 +906,7 @@ def draw_model_info(layout, model, context):
 def draw_import_button(layout, model, context):
 
     import_ops = layout.row()
-    skfb = get_sketchfab_props()
+    skfb = get_icosa_props()
 
     import_ops.enabled = skfb.skfb_api.is_user_logged() and bpy.context.mode == 'OBJECT' and Utils.is_valid_uuid(model.uid)
     if not skfb.skfb_api.is_user_logged():
@@ -1122,10 +922,10 @@ def draw_import_button(layout, model, context):
 
     download_icon = 'IMPORT' if import_ops.enabled else 'INFO'
     import_ops.scale_y = 2.0
-    import_ops.operator("wm.sketchfab_download", icon=download_icon, text=downloadlabel, translate=False, emboss=True).model_uid = model.uid
+    import_ops.operator("wm.icosa_download", icon=download_icon, text=downloadlabel, translate=False, emboss=True).model_uid = model.uid
 
 def set_log(log):
-    get_sketchfab_props().status = log
+    get_icosa_props().status = log
 
 def unzip_archive(archive_path):
     if os.path.exists(archive_path):
@@ -1207,7 +1007,7 @@ def parse_results(r, *args, **kwargs):
 
     ongoingSearches.discard(r.url)
 
-    skfb = get_sketchfab_props()
+    skfb = get_icosa_props()
     json_data = r.json()
 
     if 'current' in skfb.search_results:
@@ -1223,14 +1023,14 @@ def parse_results(r, *args, **kwargs):
             return
 
         uid = result['uid']
-        skfb.search_results['current'][result['uid']] = SketchfabModel(result)
+        skfb.search_results['current'][result['uid']] = IcosaModel(result)
 
-        if not os.path.exists(os.path.join(Config.SKETCHFAB_THUMB_DIR, uid) + '.jpeg'):
+        if not os.path.exists(os.path.join(Config.ICOSA_THUMB_DIR, uid) + '.jpeg'):
             skfb.skfb_api.request_thumbnail(result['thumbnails'], uid)
         elif uid not in skfb.custom_icons:
-            skfb.custom_icons.load(uid, os.path.join(Config.SKETCHFAB_THUMB_DIR, "{}.jpeg".format(uid)), 'IMAGE')
+            skfb.custom_icons.load(uid, os.path.join(Config.ICOSA_THUMB_DIR, "{}.jpeg".format(uid)), 'IMAGE')
 
-        # Make a request to get the download_size for org and own models
+        # Make a request to get the download_size for own models
         """
         model = skfb.search_results['current'][result['uid']]
         if model.download_size is None:
@@ -1240,17 +1040,24 @@ def parse_results(r, *args, **kwargs):
                 print(json_data)
                 if 'gltf' in json_data and 'size' in json_data['gltf']:
                     model.download_size = Utils.humanify_size(json_data['gltf']['size'])
-            requests.get(Utils.build_download_url(uid, api.use_org_profile, api.active_org), headers=api.headers, hooks={'response': set_download_size})
+            requests.get(Utils.build_download_url(uid), headers=api.headers, hooks={'response': set_download_size})
         """
 
-    if json_data['next']:
-        skfb.skfb_api.next_results_url = json_data['next']
+    if json_data['page_token']:
+        current_url = r.url
+        # Parse the URL and remove the page_token parameter
+        parsed_url = urllib.parse.urlparse(current_url)
+        query_params = urllib.parse.parse_qs(parsed_url.query)
+        query_params.pop('page_token', None)
+        url_without_page_token = urllib.parse.urlunparse(
+            parsed_url._replace(query=urllib.parse.urlencode(query_params, doseq=True)))
+        next_page = int(json_data['page_token'])
+        skfb.skfb_api.next_results_url = f"{url_without_page_token}&page_token={next_page}"
+        # This assumees page_tokens are sequential integers
+        # Currently true, but might change in the future
+        skfb.skfb_api.prev_results_url = f"{url_without_page_token}&page_token={next_page - 1}"
     else:
         skfb.skfb_api.next_results_url = None
-
-    if json_data['previous']:
-        skfb.skfb_api.prev_results_url = json_data['previous']
-    else:
         skfb.skfb_api.prev_results_url = None
 
 
@@ -1269,12 +1076,12 @@ class ThumbnailCollector(threading.Thread):
 
     def handle_thumbnail(self, r, *args, **kwargs):
         uid = r.url.split('/')[4]
-        if not os.path.exists(Config.SKETCHFAB_THUMB_DIR):
+        if not os.path.exists(Config.ICOSA_THUMB_DIR):
             try:
-                os.makedirs(Config.SKETCHFAB_THUMB_DIR)
+                os.makedirs(Config.ICOSA_THUMB_DIR)
             except:
                 pass
-        thumbnail_path = os.path.join(Config.SKETCHFAB_THUMB_DIR, uid) + '.jpeg'
+        thumbnail_path = os.path.join(Config.ICOSA_THUMB_DIR, uid) + '.jpeg'
 
         with open(thumbnail_path, "wb") as f:
             total_length = r.headers.get('content-length')
@@ -1290,9 +1097,9 @@ class ThumbnailCollector(threading.Thread):
 
         thumbnailsProgress.discard(uid)
 
-        props = get_sketchfab_props()
+        props = get_icosa_props()
         if uid not in props.custom_icons:
-            props.custom_icons.load(uid, os.path.join(Config.SKETCHFAB_THUMB_DIR, "{}.jpeg".format(uid)), 'IMAGE')
+            props.custom_icons.load(uid, os.path.join(Config.ICOSA_THUMB_DIR, "{}.jpeg".format(uid)), 'IMAGE')
 
 
 class LoginModal(bpy.types.Operator):
@@ -1301,19 +1108,39 @@ class LoginModal(bpy.types.Operator):
     bl_label = ""
     bl_options = {'INTERNAL'}
 
-    is_logging : BoolProperty(default=False)
-    error : BoolProperty(default=False)
-    error_message : StringProperty(default='')
+    is_logging: BoolProperty(default=False)
+    error: BoolProperty(default=False)
+    error_message: StringProperty(default='')
 
     def execute(self, context):
         return {'FINISHED'}
 
-    def handle_mail_login(self, r, *args, **kwargs):
-        browser_props = get_sketchfab_props()
+    # def handle_mail_login(self, r, *args, **kwargs):
+    #     browser_props = get_icosa_props()
+    #     if r.status_code == 200 and 'access_token' in r.json():
+    #         browser_props.skfb_api.access_token = r.json()['access_token']
+    #         login_props = get_icosa_login_props()
+    #         Cache.save_key('username', login_props.email)
+    #         Cache.save_key('access_token', browser_props.skfb_api.access_token)
+    #
+    #         browser_props.skfb_api.build_headers()
+    #         set_login_status('INFO', '')
+    #         browser_props.skfb_api.request_user_info()
+    #
+    #     else:
+    #         if 'error_description' in r.json():
+    #             set_login_status('ERROR', 'Failed to authenticate: bad login/password')
+    #         else:
+    #             set_login_status('ERROR', 'Failed to authenticate: bad login/password')
+    #             print('Cannot login.\n {}'.format(r.json()))
+    #
+    #     self.is_logging = False
+
+    def handle_device_login(self, r, *args, **kwargs):
+        browser_props = get_icosa_props()
         if r.status_code == 200 and 'access_token' in r.json():
             browser_props.skfb_api.access_token = r.json()['access_token']
-            login_props = get_sketchfab_login_props()
-            Cache.save_key('username', login_props.email)
+            login_props = get_icosa_login_props()
             Cache.save_key('access_token', browser_props.skfb_api.access_token)
 
             browser_props.skfb_api.build_headers()
@@ -1321,18 +1148,15 @@ class LoginModal(bpy.types.Operator):
             browser_props.skfb_api.request_user_info()
 
         else:
-            if 'error_description' in r.json():
-                set_login_status('ERROR', 'Failed to authenticate: bad login/password')
-            else:
-                set_login_status('ERROR', 'Failed to authenticate: bad login/password')
-                print('Cannot login.\n {}'.format(r.json()))
+            set_login_status(f'ERROR {r.status_code}', f'Device code failed: {r.text}')
+            print('Cannot login.\n {}'.format(r.json()))
 
         self.is_logging = False
 
     def handle_token_login(self, api_token):
-        browser_props = get_sketchfab_props()
+        browser_props = get_icosa_props()
         browser_props.skfb_api.api_token = api_token
-        login_props = get_sketchfab_login_props()
+        login_props = get_icosa_login_props()
         Cache.save_key('api_token', login_props.api_token)
 
         browser_props.skfb_api.build_headers()
@@ -1347,7 +1171,7 @@ class LoginModal(bpy.types.Operator):
             return {"FINISHED"}
 
         if self.is_logging:
-            set_login_status('FILE_REFRESH', 'Loging in to your Sketchfab account...')
+            set_login_status('FILE_REFRESH', 'Logging in to your Icosa Gallery account...')
             return {'RUNNING_MODAL'}
         else:
             return {'FINISHED'}
@@ -1356,15 +1180,20 @@ class LoginModal(bpy.types.Operator):
         self.is_logging = True
         try:
             context.window_manager.modal_handler_add(self)
-            login_props = get_sketchfab_login_props()
-            if(login_props.use_mail):
-                data = {
-                    'grant_type': 'password',
-                    'client_id': Config.CLIENTID,
-                    'username': login_props.email,
-                    'password': login_props.password,
-                }
-                requests.post(Config.SKETCHFAB_OAUTH, data=data, hooks={'response': self.handle_mail_login})
+            login_props = get_icosa_login_props()
+
+            # if login_props.use_mail:
+            #     data = {
+            #         'grant_type': 'password',
+            #         # 'client_id': Config.CLIENTID,
+            #         'username': login_props.email,
+            #         'password': login_props.password,
+            #     }
+            #     requests.post(Config.ICOSA_EMAIL_AUTH, data=data, hooks={'response': self.handle_mail_login})
+
+            if login_props.use_device_code:
+                requests.post(f"{Config.ICOSA_DEVICE_AUTH}?device_code={login_props.device_code}", hooks={'response': self.handle_device_login})
+
             else:
                 self.handle_token_login(login_props.api_token)
         except Exception as e:
@@ -1377,11 +1206,11 @@ class LoginModal(bpy.types.Operator):
 class ImportModalOperator(bpy.types.Operator):
     """Imports the selected model into Blender"""
     bl_idname = "wm.import_modal"
-    bl_label = "Import glTF model into Sketchfab"
+    bl_label = "Import glTF model to Icosa Gallery"
     bl_options = {'INTERNAL'}
 
-    gltf_path : StringProperty()
-    uid : StringProperty()
+    gltf_path: StringProperty()
+    uid: StringProperty()
     title: StringProperty()
 
     def execute(self, context):
@@ -1424,12 +1253,13 @@ class GetRequestThread(threading.Thread):
 class View3DPanel:
     bl_space_type = 'VIEW_3D'
     bl_region_type = 'TOOLS' if bpy.app.version < (2, 80, 0) else 'UI'
-    bl_category = 'Sketchfab'
+    bl_category = 'Icosa Gallery'
     bl_context = 'objectmode'
 
-class SketchfabPanel(View3DPanel, bpy.types.Panel):
+
+class IcosaPanel(View3DPanel, bpy.types.Panel):
     bl_options = {'DEFAULT_CLOSED'}
-    bl_idname = "VIEW3D_PT_sketchfab_about"
+    bl_idname = "VIEW3D_PT_icosa_about"
     bl_label = "About"
 
     @classmethod
@@ -1438,27 +1268,27 @@ class SketchfabPanel(View3DPanel, bpy.types.Panel):
 
     def draw(self, context):
 
-        skfb = get_sketchfab_props()
+        skfb = get_icosa_props()
 
         if skfb.is_latest_version == 1:
-            self.bl_label = "Sketchfab plugin v{} (up-to-date)".format(PLUGIN_VERSION)
+            self.bl_label = "Icosa Gallery plugin v{} (up-to-date)".format(PLUGIN_VERSION)
         elif skfb.is_latest_version == 0:
-            self.bl_label = "Sketchfab plugin v{} (outdated)".format(PLUGIN_VERSION)
+            self.bl_label = "Icosa Gallery plugin v{} (outdated)".format(PLUGIN_VERSION)
             self.layout.operator('wm.skfb_new_version', text='New version available', icon='ERROR')
         elif skfb.is_latest_version == -2:
-            self.bl_label = "Sketchfab plugin v{}".format(PLUGIN_VERSION)
+            self.bl_label = "Icosa Gallery plugin v{}".format(PLUGIN_VERSION)
 
         # External links
         #doc_ui = self.layout.row()
         self.layout.operator('wm.skfb_help', text='Documentation', icon='QUESTION')
         self.layout.operator('wm.skfb_report_issue', text='Report an issue', icon='ERROR')
         self.layout.label(text="Download folder:")
-        self.layout.label(text="  " + Config.SKETCHFAB_TEMP_DIR)
+        self.layout.label(text="  " + Config.ICOSA_TEMP_DIR)
+
 
 class LoginPanel(View3DPanel, bpy.types.Panel):
-    bl_idname = "VIEW3D_PT_sketchfab_login"
-    bl_label = "Activation / Log in"
-    #bl_parent_id = "VIEW3D_PT_sketchfab"
+    bl_idname = "VIEW3D_PT_icosa_login"
+    bl_label = "Log in"
 
     is_logged = BoolProperty()
 
@@ -1468,72 +1298,54 @@ class LoginPanel(View3DPanel, bpy.types.Panel):
             self.layout.operator('wm.skfb_enable', text='Activate add-on', icon="LINKED").enable = True
         else:
             # LOGIN
-            skfb_login = get_sketchfab_login_props()
+            skfb_login = get_icosa_login_props()
             layout = self.layout.box().column(align=True)
             layout.enabled = get_plugin_enabled()
             if skfb_login.skfb_api.is_user_logged():
                 login_row = layout.row()
                 login_row.label(text='Logged in as {}'.format(skfb_login.skfb_api.get_user_info()))
-                login_row.operator('wm.sketchfab_login', text='Logout', icon='DISCLOSURE_TRI_RIGHT').authenticate = False
+                login_row.operator('wm.icosa_login', text='Logout', icon='DISCLOSURE_TRI_RIGHT').authenticate = False
                 if skfb_login.status:
                     layout.prop(skfb_login, 'status', icon=skfb_login.status_type)
             else:
-                layout.label(text="Login to your Sketchfab account", icon='INFO')
-                layout.prop(skfb_login, "use_mail")
+                layout.label(text="Login to your Icosa Gallery account", icon='INFO')
+                ops_row = layout.row()
+                ops_row.operator('wm.icosa_signup', text='Create an account', icon='PLUS')
+                # Disabled for now
+                # layout.prop(skfb_login, "use_mail")
+                layout.prop(skfb_login, "use_device_code")
                 if skfb_login.use_mail:
                     layout.prop(skfb_login, "email")
                     layout.prop(skfb_login, "password")
+                elif skfb_login.use_device_code:
+                    ops_row = layout.row()
+                    ops_row.operator('wm.icosa_get_device_code', text='Get a device code', icon='PLUS')
+                    layout.prop(skfb_login, "device_code")
                 else:
                     layout.prop(skfb_login, "api_token")
-                ops_row = layout.row()
-                ops_row.operator('wm.sketchfab_signup', text='Create an account', icon='PLUS')
                 login_icon = "LINKED" if bpy.app.version < (2,80,0) else "USER"
-                ops_row.operator('wm.sketchfab_login', text='Log in', icon=login_icon).authenticate = True
+                ops_row = layout.row()
+                ops_row.operator('wm.icosa_login', text='Log in', icon=login_icon).authenticate = True
                 if skfb_login.status:
                     layout.prop(skfb_login, 'status', icon=skfb_login.status_type)
 
-class TeamsPanel(View3DPanel, bpy.types.Panel):
-    bl_idname = "VIEW3D_PT_sketchfab_teams"
-    bl_label = "Sketchfab for Teams"
-    bl_options = {'DEFAULT_CLOSED'}
-
-    def draw(self, context):
-
-        skfb = get_sketchfab_props()
-        api  = skfb.skfb_api
-
-        self.layout.enabled = get_plugin_enabled() and api.is_user_logged()
-
-        if not api.user_has_orgs:
-            self.layout.label(text="You are not part of an organization", icon='INFO')
-            self.layout.operator("wm.url_open", text='Learn about Sketchfab for Teams').url = "https://sketchfab.com/features/teams"
-        else:
-            props = get_sketchfab_props_proxy()
-
-            use_org_profile_row = self.layout.row()
-            use_org_profile_row.prop(props, "use_org_profile")
-
-            org_row = self.layout.row()
-            org_row.prop(props, "active_org")
-            org_row.enabled = skfb.skfb_api.use_org_profile
-
-            pprops = get_sketchfab_props()
 
 class Model:
     def __init__(self, _uid):
         self.uid = _uid
         self.download_size = 0
 
-class SketchfabBrowse(View3DPanel, bpy.types.Panel):
-    bl_idname = "VIEW3D_PT_sketchfab_browse"
+
+class IcosaBrowse(View3DPanel, bpy.types.Panel):
+    bl_idname = "VIEW3D_PT_icosa_browse"
     bl_label = "Import"
 
     uid   = ''
     label = "Search results"
 
     def draw_search(self, layout, context):
-        prop = get_sketchfab_props()
-        props = get_sketchfab_props_proxy()
+        prop = get_icosa_props()
+        props = get_icosa_props_proxy()
         skfb_api = prop.skfb_api
 
         # Add an option to import from url or uid
@@ -1557,16 +1369,11 @@ class SketchfabBrowse(View3DPanel, bpy.types.Panel):
             ro = col.row()
             ro.scale_y = 1.25
             ro.prop(props, "query")
-            ro.operator("wm.sketchfab_search", text="", icon='VIEWZOOM')
-
-            # User selected own models but is not pro
-            if props.search_domain == "OWN" and skfb_api.is_user_logged() and not skfb_api.is_user_pro():
-                col.label(text='A PRO account is required', icon='QUESTION')
-                col.label(text='to access your personal library')
+            ro.operator("wm.icosa_search", text="", icon='VIEWZOOM')
 
             # Display a collapsible box for filters
             col = layout.box().column(align=True)
-            col.enabled = (props.search_domain != "STORE")
+            col.enabled = True
             row = col.row()
             row.prop(props, "expanded_filters", icon="TRIA_DOWN" if props.expanded_filters else "TRIA_RIGHT", icon_only=True, emboss=False)
             row.label(text="Search filters")
@@ -1585,11 +1392,11 @@ class SketchfabBrowse(View3DPanel, bpy.types.Panel):
                     col.prop(props, "sort_by")
                     col.prop(props, "face_count")
 
-        pprops = get_sketchfab_props()
+        pprops = get_icosa_props()
 
     def draw_results(self, layout, context):
 
-        props = get_sketchfab_props()
+        props = get_icosa_props()
 
         col = layout.box().column(align=True)
 
@@ -1602,10 +1409,10 @@ class SketchfabBrowse(View3DPanel, bpy.types.Panel):
 
             result_pages_ops = col.row()
             if props.skfb_api.prev_results_url:
-                result_pages_ops.operator("wm.sketchfab_search_prev", text="Previous page", icon='FRAME_PREV')
+                result_pages_ops.operator("wm.icosa_search_prev", text="Previous page", icon='FRAME_PREV')
 
             if props.skfb_api.next_results_url:
-                result_pages_ops.operator("wm.sketchfab_search_next", text="Next page", icon='FRAME_NEXT')
+                result_pages_ops.operator("wm.icosa_search_next", text="Next page", icon='FRAME_NEXT')
 
             #result_label = 'Click below to see more results'
             #col.label(text=result_label, icon='INFO')
@@ -1642,7 +1449,7 @@ class SketchfabBrowse(View3DPanel, bpy.types.Panel):
                 draw_import_button(col, model, context)
         else:
             uid = ""
-            if "sketchfab.com" in props.manualImportPath:
+            if "icosa.gallery" in props.manualImportPath:
                 uid = props.manualImportPath[-32:]
             m = Model(uid)
             draw_import_button(col, m, context)
@@ -1656,19 +1463,20 @@ class SketchfabBrowse(View3DPanel, bpy.types.Panel):
         wm = context.window_manager
         return wm.invoke_props_dialog(self, width=900, height=850)
 
-class SketchfabExportPanel(View3DPanel, bpy.types.Panel):
-    #bl_idname = "wm.sketchfab_export" if bpy.app.version == (2, 79, 0) else "VIEW3D_PT_sketchfab_export"
+
+class IcosaExportPanel(View3DPanel, bpy.types.Panel):
+    #bl_idname = "wm.icosa_export" if bpy.app.version == (2, 79, 0) else "VIEW3D_PT_icosa_export"
     bl_options = {'DEFAULT_CLOSED'}
     bl_label = "Export"
-    bl_idname = "VIEW3D_PT_sketchfab_export"
+    bl_idname = "VIEW3D_PT_icosa_export"
 
     def draw(self, context):
 
-        api = get_sketchfab_props().skfb_api
+        api = get_icosa_props().skfb_api
         self.layout.enabled = get_plugin_enabled() and api.is_user_logged()
 
         wm = context.window_manager
-        props = wm.sketchfab_export
+        props = wm.icosa_export
 
         layout = self.layout
 
@@ -1689,11 +1497,6 @@ class SketchfabExportPanel(View3DPanel, bpy.types.Panel):
         if props.reuploadBoolean:
             col.prop(props, "reuploadPath")
 
-        # Project selection if member of an org
-        if api.active_org and api.use_org_profile:
-            row = layout.row()
-            row.prop(props, "active_project")
-
         # Upload button
         row = layout.row()
         row.scale_y = 2.0
@@ -1708,34 +1511,35 @@ class SketchfabExportPanel(View3DPanel, bpy.types.Panel):
         if sf_state.uploading:
             upload_label = "Uploading %s" % sf_state.size_label
             upload_icon  = "SORTTIME"
-        row.operator("wm.sketchfab_export", icon=upload_icon, text=upload_label)
+        row.operator("wm.icosa_export", icon=upload_icon, text=upload_label)
 
         model_url = sf_state.model_url
         if model_url:
             layout.operator("wm.url_open", text="View Online Model", icon='URL').url = model_url
 
-class SketchfabLogger(bpy.types.Operator):
-    """Log in / out your Sketchab.com account"""
-    bl_idname = 'wm.sketchfab_login'
-    bl_label = 'Sketchfab Login'
+
+class IcosaLogger(bpy.types.Operator):
+    """Log in / out your Icosa Gallery account"""
+    bl_idname = 'wm.icosa_login'
+    bl_label = 'Icosa Gallery Login'
     bl_options = {'INTERNAL'}
 
-    authenticate : BoolProperty(default=True)
+    authenticate: BoolProperty(default=True)
 
     def execute(self, context):
-        set_login_status('FILE_REFRESH', 'Login to your Sketchfab account...')
+        set_login_status('FILE_REFRESH', 'Login to your Icosa Gallery account...')
         wm = context.window_manager
         if self.authenticate:
-            wm.sketchfab_browser.skfb_api.login(wm.sketchfab_api.email, wm.sketchfab_api.password, wm.sketchfab_api.api_token)
+            wm.icosa_browser.skfb_api.login(wm.icosa_api.email, wm.icosa_api.password, wm.icosa_api.api_token)
         else:
-            wm.sketchfab_browser.skfb_api.logout()
-            wm.sketchfab_api.password = ''
-            wm.sketchfab_api.last_password = "default"
+            wm.icosa_browser.skfb_api.logout()
+            wm.icosa_api.password = ''
+            wm.icosa_api.last_password = "default"
             set_login_status('FILE_REFRESH', '')
         return {'FINISHED'}
 
 
-class SketchfabModel:
+class IcosaModel:
     def __init__(self, json_data):
         self.title = str(json_data['name'])
         self.author = json_data['user']['displayName']
@@ -1750,7 +1554,7 @@ class SketchfabModel:
         else:
             self.download_size = None
 
-        self.thumbnail_url = os.path.join(Config.SKETCHFAB_THUMB_DIR, '{}.jpeg'.format(self.uid))
+        self.thumbnail_url = os.path.join(Config.ICOSA_THUMB_DIR, '{}.jpeg'.format(self.uid))
 
         # Model info request
         self.info_requested = False
@@ -1769,54 +1573,54 @@ def ShowMessage(icon = "INFO", title = "Info", message = "Information"):
     bpy.context.window_manager.popup_menu(draw, title = title, icon = icon)
 
 
-class SketchfabDownloadModel(bpy.types.Operator):
+class IcosaDownloadModel(bpy.types.Operator):
     """Import the selected model"""
-    bl_idname = "wm.sketchfab_download"
+    bl_idname = "wm.icosa_download"
     bl_label = "Downloading"
     bl_options = {'INTERNAL'}
 
-    model_uid : bpy.props.StringProperty(name="uid")
+    model_uid: bpy.props.StringProperty(name="uid")
 
     def execute(self, context):
-        skfb_api = context.window_manager.sketchfab_browser.skfb_api
+        skfb_api = context.window_manager.icosa_browser.skfb_api
         skfb_api.download_model(self.model_uid)
         return {'FINISHED'}
 
 
-class ViewOnSketchfab(bpy.types.Operator):
-    """Upload your model to Sketchfab"""
-    bl_idname = "wm.sketchfab_view"
-    bl_label = "View the model on Sketchfab"
+class ViewOnIcosaGallery(bpy.types.Operator):
+    """Upload your model to Icosa Gallery"""
+    bl_idname = "wm.icosa_view"
+    bl_label = "View the model on Icosa Gallery"
     bl_options = {'INTERNAL'}
 
-    model_uid : bpy.props.StringProperty(name="uid")
+    model_uid: bpy.props.StringProperty(name="uid")
 
     def execute(self, context):
         import webbrowser
-        webbrowser.open('{}/models/{}'.format(Config.SKETCHFAB_URL, self.model_uid))
+        webbrowser.open('{}/models/{}'.format(Config.ICOSA_URL, self.model_uid))
         return {'FINISHED'}
 
 
 def clear_search():
-    skfb = get_sketchfab_props()
+    skfb = get_icosa_props()
     skfb.has_loaded_thumbnails = False
     skfb.search_results.clear()
     skfb.custom_icons.clear()
     bpy.data.window_managers['WinMan']['result_previews'] = 0
 
 
-class SketchfabSearch(bpy.types.Operator):
-    """Send a search query to Sketchfab
-    Searches on the selected domain (all site, own models for PRO+ users, organization...)
+class IcosaSearch(bpy.types.Operator):
+    """Send a search query to Icosa Gallery
+    Searches on the selected domain (all site or own models)
     and takes into accounts various search filters"""
-    bl_idname = "wm.sketchfab_search"
-    bl_label = "Search Sketchfab"
+    bl_idname = "wm.icosa_search"
+    bl_label = "Search Icosa Gallery"
     bl_options = {'INTERNAL'}
 
     def execute(self, context):
         # prepare request for search
         clear_search()
-        skfb = get_sketchfab_props()
+        skfb = get_icosa_props()
         skfb.skfb_api.prev_results_url = None
         skfb.skfb_api.next_results_url = None
         final_query = build_search_request(skfb.query, skfb.pbr, skfb.animated, skfb.staffpick, skfb.face_count, skfb.categories, skfb.sort_by)
@@ -1824,49 +1628,61 @@ class SketchfabSearch(bpy.types.Operator):
         return {'FINISHED'}
 
 
-class SketchfabSearchNextResults(bpy.types.Operator):
+class IcosaSearchNextResults(bpy.types.Operator):
     """Loads the next batch of 24 models from the search results"""
-    bl_idname = "wm.sketchfab_search_next"
-    bl_label = "Search Sketchfab"
+    bl_idname = "wm.icosa_search_next"
+    bl_label = "Search Icosa Gallery"
     bl_options = {'INTERNAL'}
 
     def execute(self, context):
         # prepare request for search
         clear_search()
-        skfb_api = get_sketchfab_props().skfb_api
+        skfb_api = get_icosa_props().skfb_api
         skfb_api.search_cursor(skfb_api.next_results_url, parse_results)
         return {'FINISHED'}
 
 
-class SketchfabSearchPreviousResults(bpy.types.Operator):
+class IcosaSearchPreviousResults(bpy.types.Operator):
     """Loads the previous batch of 24 models from the search results"""
-    bl_idname = "wm.sketchfab_search_prev"
-    bl_label = "Search Sketchfab"
+    bl_idname = "wm.icosa_search_prev"
+    bl_label = "Search Icosa Gallery"
     bl_options = {'INTERNAL'}
 
     def execute(self, context):
         # prepare request for search
         clear_search()
-        skfb_api = get_sketchfab_props().skfb_api
+        skfb_api = get_icosa_props().skfb_api
         skfb_api.search_cursor(skfb_api.prev_results_url, parse_results)
         return {'FINISHED'}
 
-class SketchfabCreateAccount(bpy.types.Operator):
-    """Create an account on sketchfab.com"""
-    bl_idname = "wm.sketchfab_signup"
-    bl_label = "Sketchfab"
+class IcosaCreateAccount(bpy.types.Operator):
+    """Create an account on icosa.gallery"""
+    bl_idname = "wm.icosa_signup"
+    bl_label = "Icosa Gallery"
     bl_options = {'INTERNAL'}
 
     def execute(self, context):
         import webbrowser
-        webbrowser.open(Config.SKETCHFAB_SIGNUP)
+        webbrowser.open(Config.ICOSA_SIGNUP)
+        return {'FINISHED'}
+
+class IcosaGetDeviceCode(bpy.types.Operator):
+    """Get a device code from icosa.gallery"""
+    bl_idname = "wm.icosa_get_device_code"
+    bl_label = "Icosa Gallery"
+    bl_options = {'INTERNAL'}
+
+    def execute(self, context):
+        import webbrowser
+        webbrowser.open(Config.ICOSA_GET_DEVICE_CODE)
         return {'FINISHED'}
 
 
-class SketchfabNewVersion(bpy.types.Operator):
+
+class IcosaNewVersion(bpy.types.Operator):
     """Opens addon latest available release on github"""
     bl_idname = "wm.skfb_new_version"
-    bl_label = "Sketchfab"
+    bl_label = "Icosa Gallery"
     bl_options = {'INTERNAL'}
 
     def execute(self, context):
@@ -1875,22 +1691,22 @@ class SketchfabNewVersion(bpy.types.Operator):
         return {'FINISHED'}
 
 
-class SketchfabReportIssue(bpy.types.Operator):
+class IcosaReportIssue(bpy.types.Operator):
     """Open an issue on github tracker"""
     bl_idname = "wm.skfb_report_issue"
-    bl_label = "Sketchfab"
+    bl_label = "Icosa Gallery"
     bl_options = {'INTERNAL'}
 
     def execute(self, context):
         import webbrowser
-        webbrowser.open(Config.SKETCHFAB_REPORT_URL)
+        webbrowser.open(Config.ICOSA_REPORT_URL)
         return {'FINISHED'}
 
 
-class SketchfabHelp(bpy.types.Operator):
+class IcosaHelp(bpy.types.Operator):
     """Opens the addon README on github"""
     bl_idname = "wm.skfb_help"
-    bl_label = "Sketchfab"
+    bl_label = "Icosa Gallery"
     bl_options = {'INTERNAL'}
 
     def execute(self, context):
@@ -1900,8 +1716,9 @@ class SketchfabHelp(bpy.types.Operator):
 
 
 def activate_plugin():
-    props = get_sketchfab_props()
-    login = get_sketchfab_login_props()
+    props = get_icosa_props()
+    login = get_icosa_login_props()
+    login.device_code = ''
 
     # Fill login/access_token
     cache_data = Cache.read()
@@ -1912,31 +1729,33 @@ def activate_plugin():
         props.skfb_api.access_token = cache_data['access_token']
         props.skfb_api.build_headers()
         props.skfb_api.request_user_info()
-        props.skfb_api.use_mail = True
+        props.skfb_api.use_mail = False
+        props.skfb_api.use_device_code = True
     elif 'api_token' in cache_data:
         props.skfb_api.api_token = cache_data['api_token']
         props.skfb_api.build_headers()
         props.skfb_api.request_user_info()
         props.skfb_api.use_mail = False
+        props.skfb_api.use_device_code = False
 
     global is_plugin_enabled
     is_plugin_enabled = True
 
     try:
-        requests.get(Config.SKETCHFAB_PLUGIN_VERSION, hooks={'response': check_plugin_version})
+        requests.get(Config.ICOSA_PLUGIN_VERSION, hooks={'response': check_plugin_version})
     except Exception as e:
         print('Error when checking for version: {}'.format(e))
 
     run_default_search()
 
 
-class SketchfabEnable(bpy.types.Operator):
+class IcosaEnable(bpy.types.Operator):
     """Activate the addon (checks login, cache folders...)"""
     bl_idname = "wm.skfb_enable"
-    bl_label = "Sketchfab"
+    bl_label = "Icosa Gallery"
     bl_options = {'INTERNAL'}
 
-    enable : BoolProperty(default=True)
+    enable: BoolProperty(default=True)
     def execute(self, context):
         if self.enable:
             activate_plugin()
@@ -1944,67 +1763,61 @@ class SketchfabEnable(bpy.types.Operator):
         return {'FINISHED'}
 
 
-class SketchfabExportProps(bpy.types.PropertyGroup):
-    description : StringProperty(
+class IcosaExportProps(bpy.types.PropertyGroup):
+    description: StringProperty(
             name="Description",
             description="Description of the model (optional)",
             default="",
             maxlen=1024)
-    filepath : StringProperty(
+    filepath: StringProperty(
             name="Filepath",
             description="internal use",
             default="",
             )
-    selection : BoolProperty(
+    selection: BoolProperty(
             name="Selection only",
             description="Determines which meshes are exported",
             default=False,
             )
-    private : BoolProperty(
+    private: BoolProperty(
             name="Private",
             description="Upload as private (requires a pro account)",
             default=False,
             )
-    draft : BoolProperty(
+    draft: BoolProperty(
             name="Draft",
             description="Do not publish the model",
             default=True,
             )
-    password : StringProperty(
+    password: StringProperty(
             name="Password",
             description="Password-protect your model (requires a pro account)",
             default="",
             )
-    tags : StringProperty(
+    tags: StringProperty(
             name="Tags",
             description="List of tags (42 max), separated by spaces (optional)",
             default="",
             )
-    title : StringProperty(
+    title: StringProperty(
             name="Title",
             description="Title of the model (determined automatically if left empty)",
             default="",
             maxlen=48
             )
-    reuploadBoolean : BoolProperty(
+    reuploadBoolean: BoolProperty(
             name="Reupload",
             description="Reupload the model over an existing one",
             default=False,
             )
-    reuploadPath : StringProperty(
+    reuploadPath: StringProperty(
             name="Url",
             description="Paste full model url to reupload to",
             default="",
             maxlen=1024)
-    active_project : EnumProperty(
-        name="Project",
-        items=get_org_projects,
-        description="Active project",
-        update=refresh_orgs
-    )
 
 
-class _SketchfabState:
+class _IcosaState:
     """Singleton to store state"""
     __slots__ = (
         "uploading",
@@ -2021,8 +1834,8 @@ class _SketchfabState:
         self.report_message = ""
         self.report_type = ''
 
-sf_state = _SketchfabState()
-del _SketchfabState
+sf_state = _IcosaState()
+del _IcosaState
 
 # remove file copy
 def terminate(filepath):
@@ -2034,14 +1847,14 @@ def upload_report(report_message, report_type):
     sf_state.report_message = report_message
     sf_state.report_type = report_type
 
-# upload the blend-file to sketchfab
+# upload the blend-file to Icosa
 def upload(filepath, filename):
 
-    props = get_sketchfab_props()
+    props = get_icosa_props()
     api   = props.skfb_api
 
     wm = bpy.context.window_manager
-    props = wm.sketchfab_export
+    props = wm.icosa_export
 
     title = props.title
     if not title:
@@ -2075,7 +1888,7 @@ def upload(filepath, filename):
 
         requestFunction = requests.put
 
-        if "sketchfab.com/" not in props.reuploadPath:
+        if "icosa.gallery/" not in props.reuploadPath:
             return upload_report("reupload url is malformed %s" % props.reuploadPath, 'ERROR')
 
         # Get the model uid
@@ -2086,39 +1899,16 @@ def upload(filepath, filename):
         except:
             return upload_report("reupload url is malformed %s" % props.reuploadPath, 'ERROR')
 
-        # If the model is in an org, find if the user has access to it
-        if "/orgs/" in props.reuploadPath:
-            if True:#try:
-                orgName = props.reuploadPath.split("/orgs/")[1].split("/")[0]
-                user_orgs = api.user_orgs
-                orgUid = ""
-                for org in user_orgs:
-                    if org["username"] == orgName:
-                        orgUid = org["uid"]
-                        break
-                if orgUid:
-                    uploadUrl = '{}/{}/models/{}'.format(Config.SKETCHFAB_ORGS, orgUid, modelUid)
-                else:
-                    return upload_report("User does not appear to belong to org %s" % (orgName), 'ERROR')
-            else:#aexcept:
-                return upload_report("Cannot parse the org name from the url %s" % props.reuploadPath, 'ERROR')
-        # Otherwise, request a direct reupload
-        else:
-            uploadUrl = '{}/{}'.format(Config.SKETCHFAB_MODEL, modelUid)
+        uploadUrl = '{}/{}'.format(Config.ICOSA_MODEL, modelUid)
 
         _data = {
-            "uid" : modelUid,
+            "uid": modelUid,
             "source": "blender-exporter"
         }
 
     else:
 
-        # Org or not
-        if api.user_has_orgs and api.use_org_profile:
-            uploadUrl = "%s/%s/models" % (Config.SKETCHFAB_ORGS, api.active_org["uid"])
-            _data["orgProject"] = props.active_project
-        else:
-            uploadUrl = Config.SKETCHFAB_MODEL
+        uploadUrl = Config.ICOSA_MODEL
 
     # Upload and parse the result
     try:
@@ -2137,15 +1927,15 @@ def upload(filepath, filename):
     else:
         try:
             result = r.json()
-            sf_state.model_url = Config.SKETCHFAB_URL + "/models/" + result["uid"]
+            sf_state.model_url = Config.ICOSA_URL + "/models/" + result["uid"]
         except:
-            sf_state.model_url = Config.SKETCHFAB_URL + "/models/" + modelUid
-        return upload_report("Upload complete. Available on your sketchfab.com dashboard.", 'INFO')
+            sf_state.model_url = Config.ICOSA_URL + "/models/" + modelUid
+        return upload_report("Upload complete. Available on your icosa.gallery dashboard.", 'INFO')
 
 
-class ExportSketchfab(bpy.types.Operator):
-    """Upload your model to Sketchfab"""
-    bl_idname = "wm.sketchfab_export"
+class ExportIcosa(bpy.types.Operator):
+    """Upload your model to Icosa Gallery"""
+    bl_idname = "wm.icosa_export"
     bl_label = "Upload"
 
     _timer = None
@@ -2155,7 +1945,7 @@ class ExportSketchfab(bpy.types.Operator):
         if event.type == 'TIMER':
             if not self._thread.is_alive():
                 wm = context.window_manager
-                props = wm.sketchfab_export
+                props = wm.icosa_export
 
                 terminate(props.filepath)
 
@@ -2181,7 +1971,7 @@ class ExportSketchfab(bpy.types.Operator):
             return {'CANCELLED'}
 
         wm = context.window_manager
-        props = wm.sketchfab_export
+        props = wm.icosa_export
         sf_state.model_url = ""
 
         # Prepare to save the file
@@ -2193,15 +1983,15 @@ class ExportSketchfab(bpy.types.Operator):
         if not ext:
             ext = ".blend"
         tempdir = tempfile.mkdtemp()
-        filepath = os.path.join(tempdir, "export-sketchfab" + ext)
+        filepath = os.path.join(tempdir, "export-icosa" + ext)
 
-        SKETCHFAB_EXPORT_DATA_FILE = os.path.join(tempdir, "export-sketchfab.json")
+        ICOSA_EXPORT_DATA_FILE = os.path.join(tempdir, "export-icosa.json")
 
         try:
             # save a copy of actual scene but don't interfere with the users models
             bpy.ops.wm.save_as_mainfile(filepath=filepath, compress=True, copy=True)
 
-            with open(SKETCHFAB_EXPORT_DATA_FILE, 'w') as s:
+            with open(ICOSA_EXPORT_DATA_FILE, 'w') as s:
                 json.dump({
                         "selection": props.selection,
                         }, s)
@@ -2218,22 +2008,20 @@ class ExportSketchfab(bpy.types.Operator):
             os.remove(filepath)
 
             # read subprocess call results
-            with open(SKETCHFAB_EXPORT_DATA_FILE, 'r') as s:
+            with open(ICOSA_EXPORT_DATA_FILE, 'r') as s:
                 r = json.load(s)
                 size = r["size"]
                 props.filepath = r["filepath"]
                 filename = r["filename"]
 
-            os.remove(SKETCHFAB_EXPORT_DATA_FILE)
+            os.remove(ICOSA_EXPORT_DATA_FILE)
 
         except Exception as e:
             self.report({'WARNING'}, "Error occured while preparing your file: %s" % str(e))
             return {'FINISHED'}
 
         # Check the generated file size against the user plans, to know if the upload will succeed
-        upload_limit = Config.SKETCHFAB_UPLOAD_LIMITS[get_sketchfab_props().skfb_api.plan_type]
-        if get_sketchfab_props().skfb_api.use_org_profile:
-            upload_limit = Config.SKETCHFAB_UPLOAD_LIMITS["ent"]
+        upload_limit = Config.ICOSA_UPLOAD_LIMITS['basic']
         if size > upload_limit:
             human_size_limit    = Utils.humanify_size(upload_limit)
             human_exported_size = Utils.humanify_size(size)
@@ -2286,33 +2074,33 @@ def updateCacheDirectory(self, context):
 
     # Delete the old directory
     # Won't delete anything upon plugin intialization, only when switching path in preferences
-    if Config.SKETCHFAB_TEMP_DIR and os.path.exists(Config.SKETCHFAB_TEMP_DIR) and os.path.isdir(Config.SKETCHFAB_TEMP_DIR):
-        shutil.rmtree(Config.SKETCHFAB_TEMP_DIR)
+    if Config.ICOSA_TEMP_DIR and os.path.exists(Config.ICOSA_TEMP_DIR) and os.path.isdir(Config.ICOSA_TEMP_DIR):
+        shutil.rmtree(Config.ICOSA_TEMP_DIR)
 
     # Create the paths and directories for temporary directories
-    Config.SKETCHFAB_TEMP_DIR = os.path.join(path, "sketchfab_downloads")
-    Config.SKETCHFAB_THUMB_DIR = os.path.join(Config.SKETCHFAB_TEMP_DIR, 'thumbnails')
-    Config.SKETCHFAB_MODEL_DIR = os.path.join(Config.SKETCHFAB_TEMP_DIR, 'imports')
-    if not os.path.exists(Config.SKETCHFAB_TEMP_DIR): os.makedirs(Config.SKETCHFAB_TEMP_DIR)
-    if not os.path.exists(Config.SKETCHFAB_THUMB_DIR): os.makedirs(Config.SKETCHFAB_THUMB_DIR)
-    if not os.path.exists(Config.SKETCHFAB_MODEL_DIR): os.makedirs(Config.SKETCHFAB_MODEL_DIR)
+    Config.ICOSA_TEMP_DIR = os.path.join(path, "icosa_downloads")
+    Config.ICOSA_THUMB_DIR = os.path.join(Config.ICOSA_TEMP_DIR, 'thumbnails')
+    Config.ICOSA_MODEL_DIR = os.path.join(Config.ICOSA_TEMP_DIR, 'imports')
+    if not os.path.exists(Config.ICOSA_TEMP_DIR): os.makedirs(Config.ICOSA_TEMP_DIR)
+    if not os.path.exists(Config.ICOSA_THUMB_DIR): os.makedirs(Config.ICOSA_THUMB_DIR)
+    if not os.path.exists(Config.ICOSA_MODEL_DIR): os.makedirs(Config.ICOSA_MODEL_DIR)
 
-class SketchfabAddonPreferences(bpy.types.AddonPreferences):
+class IcosaAddonPreferences(bpy.types.AddonPreferences):
     bl_idname = __name__
     cachePath: StringProperty(
         name="Cache folder",
         description=(
-            "Temporary directory for downloads from sketchfab.com\n"
+            "Temporary directory for downloads from icosa.gallery\n"
             "Set by the OS by default, make sure to have write access\n"
             "to this directory if you set it manually"
         ),
         subtype='DIR_PATH',
         update=updateCacheDirectory
     )
-    downloadHistory : StringProperty(
+    downloadHistory: StringProperty(
         name="Download history file",
         description=(
-            ".csv file containing your downloads from sketchfab.com\n"
+            ".csv file containing your downloads from icosa.gallery\n"
             "If valid, the name, license and url of every model you\n"
             "download through the plugin will be saved in this file"
         ),
@@ -2324,41 +2112,41 @@ class SketchfabAddonPreferences(bpy.types.AddonPreferences):
         layout.prop(self, "downloadHistory", text="Download history (.csv)")
 
 classes = (
-    SketchfabAddonPreferences,
+    IcosaAddonPreferences,
 
     # Properties
-    SketchfabBrowserProps,
-    SketchfabLoginProps,
-    SketchfabBrowserPropsProxy,
-    SketchfabExportProps,
+    IcosaBrowserProps,
+    IcosaLoginProps,
+    IcosaBrowserPropsProxy,
+    IcosaExportProps,
 
     # Panels
     LoginPanel,
-    TeamsPanel,
-    SketchfabBrowse,
-    SketchfabExportPanel,
-    SketchfabPanel,
+    IcosaBrowse,
+    IcosaExportPanel,
+    IcosaPanel,
 
     # Operators
-    SketchfabEnable,
-    SketchfabCreateAccount,
+    IcosaEnable,
+    IcosaCreateAccount,
+    IcosaGetDeviceCode,
     LoginModal,
-    SketchfabNewVersion,
-    SketchfabHelp,
-    SketchfabReportIssue,
-    SketchfabSearch,
-    SketchfabSearchPreviousResults,
-    SketchfabSearchNextResults,
+    IcosaNewVersion,
+    IcosaHelp,
+    IcosaReportIssue,
+    IcosaSearch,
+    IcosaSearchPreviousResults,
+    IcosaSearchNextResults,
     ImportModalOperator,
-    ViewOnSketchfab,
-    SketchfabDownloadModel,
-    SketchfabLogger,
-    ExportSketchfab,
+    ViewOnIcosaGallery,
+    IcosaDownloadModel,
+    IcosaLogger,
+    ExportIcosa,
     )
 
 def check_plugin_version(request, *args, **kwargs):
     response = request.json()
-    skfb = get_sketchfab_props()
+    skfb = get_icosa_props()
     if response and len(response):
         latest_release_version = response[0]['tag_name'].replace('.', '')
         current_version = str(bl_info['version']).replace(',', '').replace('(', '').replace(')', '').replace(' ', '')
@@ -2374,32 +2162,32 @@ def check_plugin_version(request, *args, **kwargs):
         skfb.is_latest_version = -2
 
 def register():
-    sketchfab_icon = bpy.utils.previews.new()
+    icosa_icon = bpy.utils.previews.new()
     icons_dir      = os.path.dirname(__file__)
-    sketchfab_icon.load("skfb", os.path.join(icons_dir, "logo.png"), 'IMAGE')
-    sketchfab_icon.load("0",    os.path.join(icons_dir, "placeholder.png"), 'IMAGE')
+    icosa_icon.load("skfb", os.path.join(icons_dir, "logo.png"), 'IMAGE')
+    icosa_icon.load("0",    os.path.join(icons_dir, "placeholder.png"), 'IMAGE')
 
     res = []
-    res.append(('NORESULTS', 'empty', "", sketchfab_icon['0'].icon_id, 0))
+    res.append(('NORESULTS', 'empty', "", icosa_icon['0'].icon_id, 0))
     preview_collection['default'] = tuple(res)
-    preview_collection['skfb'] = sketchfab_icon
+    preview_collection['skfb'] = icosa_icon
     bpy.types.WindowManager.result_previews = EnumProperty(items=list_current_results)
 
     for cls in classes:
         bpy.utils.register_class(cls)
 
-    bpy.types.WindowManager.sketchfab_browser = PointerProperty(
-                type=SketchfabBrowserProps)
+    bpy.types.WindowManager.icosa_browser = PointerProperty(
+                type=IcosaBrowserProps)
 
-    bpy.types.WindowManager.sketchfab_browser_proxy = PointerProperty(
-                type=SketchfabBrowserPropsProxy)
+    bpy.types.WindowManager.icosa_browser_proxy = PointerProperty(
+                type=IcosaBrowserPropsProxy)
 
-    bpy.types.WindowManager.sketchfab_api = PointerProperty(
-                type=SketchfabLoginProps,
+    bpy.types.WindowManager.icosa_api = PointerProperty(
+                type=IcosaLoginProps,
                 )
 
-    bpy.types.WindowManager.sketchfab_export = PointerProperty(
-                type=SketchfabExportProps,
+    bpy.types.WindowManager.icosa_export = PointerProperty(
+                type=IcosaExportProps,
                 )
 
     # If a cache path was set in preferences, use it
@@ -2409,10 +2197,10 @@ def unregister():
     for cls in classes:
         bpy.utils.unregister_class(cls)
 
-    del bpy.types.WindowManager.sketchfab_api
-    del bpy.types.WindowManager.sketchfab_browser
-    del bpy.types.WindowManager.sketchfab_browser_proxy
-    del bpy.types.WindowManager.sketchfab_export
+    del bpy.types.WindowManager.icosa_api
+    del bpy.types.WindowManager.icosa_browser
+    del bpy.types.WindowManager.icosa_browser_proxy
+    del bpy.types.WindowManager.icosa_export
 
     bpy.utils.previews.remove(preview_collection['skfb'])
     del bpy.types.WindowManager.result_previews
