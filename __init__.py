@@ -13,7 +13,7 @@ WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 See the License for the specific language governing permissions and
 limitations under the License.
 """
-
+import functools
 import os
 import urllib
 import urllib.parse
@@ -78,12 +78,12 @@ class Config:
     ICOSA_MODEL = f'{ICOSA_API}/assets'
     ICOSA_DEVICE_AUTH = f'{ICOSA_API}/login/device_login'
 
-    ICOSA_ME = f'{ICOSA_API}/v1/users/me'
+    ICOSA_ME = f'{ICOSA_API}/users/me'
     BASE_SEARCH_OWN_MODELS = f'{ICOSA_ME}/assets?'
 
-    ICOSA_SEARCH = f'{ICOSA_API}/assets'
-    BASE_SEARCH = f'{ICOSA_SEARCH}?'
-    DEFAULT_FLAGS = f''
+    ICOSA_SEARCH = f'{ICOSA_API}/assets?'
+    BASE_SEARCH = f'{ICOSA_SEARCH}'
+    DEFAULT_FLAGS = f'orderBy=BEST&license=CREATIVE_COMMONS_BY&format=GLTF2'
     DEFAULT_SEARCH = f'{BASE_SEARCH}{DEFAULT_FLAGS}'
 
     # PURCHASED_MODELS = ICOSA_ME + "/models/purchases?type=models"
@@ -95,40 +95,55 @@ class Config:
     ICOSA_THUMB_DIR = ""
     ICOSA_MODEL_DIR = ""
 
-    ICOSA_CATEGORIES = (('ALL', 'All categories', 'All categories'),
-                            ('animals-pets', 'Animals & Pets', 'Animals and Pets'),
-                            ('architecture', 'Architecture', 'Architecture'),
-                            ('art-abstract', 'Art & Abstract', 'Art & Abstract'),
-                            ('cars-vehicles', 'Cars & vehicles', 'Cars & vehicles'),
-                            ('characters-creatures', 'Characters & Creatures', 'Characters & Creatures'),
-                            ('cultural-heritage-history', 'Cultural Heritage & History', 'Cultural Heritage & History'),
-                            ('electronics-gadgets', 'Electronics & Gadgets', 'Electronics & Gadgets'),
-                            ('fashion-style', 'Fashion & Style', 'Fashion & Style'),
-                            ('food-drink', 'Food & Drink', 'Food & Drink'),
-                            ('furniture-home', 'Furniture & Home', 'Furniture & Home'),
-                            ('music', 'Music', 'Music'),
-                            ('nature-plants', 'Nature & Plants', 'Nature & Plants'),
-                            ('news-politics', 'News & Politics', 'News & Politics'),
-                            ('people', 'People', 'People'),
-                            ('places-travel', 'Places & Travel', 'Places & Travel'),
-                            ('science-technology', 'Science & Technology', 'Science & Technology'),
-                            ('sports-fitness', 'Sports & Fitness', 'Sports & Fitness'),
-                            ('weapons-military', 'Weapons & Military', 'Weapons & Military'))
+    ICOSA_CATEGORIES = (
+        ('ALL', 'All categories', 'All categories'),
+        ('ANIMALS', 'Animals & Pets', 'Animals & Pets'),
+        ('ARCHITECTURE', 'Architecture', 'Architecture'),
+        ('ART', 'Art', 'Art'),
+        ('CULTURE', 'Culture & Humanity', 'Culture & Humanity'),
+        ('EVENTS', 'Current Events', 'Current Events'),
+        ('FOOD', 'Food & Drink', 'Food & Drink'),
+        ('HISTORY', 'History', 'History'),
+        ('HOME', 'Furniture & Home', 'Furniture & Home'),
+        ('MISCELLANEOUS', 'Miscellaneous', 'Miscellaneous'),
+        ('NATURE', 'Nature', 'Nature'),
+        ('OBJECTS', 'Objects', 'Objects'),
+        ('PEOPLE', 'People & Characters', 'People & Characters'),
+        ('PLACES', 'Places & Scenes', 'Places & Scenes'),
+        ('SCIENCE', 'Science', 'Science'),
+        ('SPORTS', 'Sports & Fitness', 'Sports & Fitness'),
+        ('TECH', 'Tools & Technology', 'Tools & Technology'),
+        ('TRANSPORT', 'Transport', 'Transport'),
+        ('TRAVEL', 'Travel & Leisure', 'Travel & Leisure')
+    )
 
-    ICOSA_FACECOUNT = (('ANY', "All", ""),
-                           ('10K', "Up to 10k", ""),
-                           ('50K', "10k to 50k", ""),
-                           ('100K', "50k to 100k", ""),
-                           ('250K', "100k to 250k", ""),
-                           ('250KP', "250k +", ""))
+    ICOSA_FACECOUNT = (
+        ('ANY', "All", ""),
+        ('10K', "Up to 10k", ""),
+        ('50K', "10k to 50k", ""),
+        ('100K', "50k to 100k", ""),
+        ('250K', "100k to 250k", ""),
+        ('250KP', "250k +", "")
+    )
 
-    ICOSA_SORT_BY = (('RELEVANCE', "Relevance", ""),
-                         ('LIKES', "Likes", ""),
-                         ('VIEWS', "Views", ""),
-                         ('RECENT', "Recent", ""))
+    ICOSA_SORT_BY = (
+        ('NEWEST', "Newest", ""),
+        ('OLDEST', "Oldest", ""),
+        ('BEST', "Best", ""),
+        ('TRIANGLE_COUNT', "Triangle Count", ""),
+        ('LIKED_TIME', "Recently Liked", ""),
+        ('CREATE_TIME', "Creation Time", ""),
+        ('UPDATE_TIME', "Updated     Time", ""),
+        ('LIKES', "Likes", ""),
+        ('DOWNLOADS', "Downloads", ""),
+        ('DISPLAY_NAME', "Title", ""),
+        ('AUTHOR_NAME', "Author", "")
+    )
 
-    ICOSA_SEARCH_DOMAIN = (('DEFAULT', "All site", "", 0),
-                               ('OWN', "Own Models", "", 1))
+    ICOSA_SEARCH_DOMAIN = (
+        ('DEFAULT', "All site", "", 0),
+        ('OWN', "Own Models", "", 1)
+    )
 
     MAX_THUMBNAIL_HEIGHT = 256
 
@@ -168,11 +183,11 @@ class Utils:
         readable = round(readable, 2)
         return '{}{}'.format(readable, suffix)
 
-    def build_download_url(uid):
-        return '{}/{}/download'.format(Config.ICOSA_MODEL, uid)
+    def build_download_url(assetId):
+        return '{}/{}/download'.format(Config.ICOSA_MODEL, assetId)
 
-    def thumbnail_file_exists(uid):
-        return os.path.exists(os.path.join(Config.ICOSA_THUMB_DIR, '{}.jpeg'.format(uid)))
+    def thumbnail_file_exists(assetId):
+        return os.path.exists(os.path.join(Config.ICOSA_THUMB_DIR, '{}.png'.format(assetId)))
 
     def clean_thumbnail_directory():
         if not os.path.exists(Config.ICOSA_THUMB_DIR):
@@ -182,42 +197,25 @@ class Utils:
         for file in listdir(Config.ICOSA_THUMB_DIR):
             os.remove(os.path.join(Config.ICOSA_THUMB_DIR, file))
 
-    def clean_downloaded_model_dir(uid):
-        shutil.rmtree(os.path.join(Config.ICOSA_MODEL_DIR, uid))
+    def clean_downloaded_model_dir(assetId):
+        shutil.rmtree(os.path.join(Config.ICOSA_MODEL_DIR, assetId))
 
     def get_thumbnail_url(thumbnails_json):
-        min_height  = 1e6
-        min_thumbnail = None
-        best_height = 0
-        best_thumbnail = None
-        for image in thumbnails_json['images']:
-            h = image['height']
-            if h <= Config.MAX_THUMBNAIL_HEIGHT and h > best_height:
-                best_height = h
-                best_thumbnail = image['url']
-            elif h < min_height:
-                min_height = h
-                min_thumbnail = image['url']
-        # Ensure we have a thumbnail if available thumbnails are all above MAX_THUMBNAIL_HEIGHT
-        if best_thumbnail is None and min_thumbnail is not None:
-            return min_thumbnail
+        best_thumbnail = thumbnails_json['url']
         return best_thumbnail
 
     def setup_plugin():
         if not os.path.exists(Config.ICOSA_THUMB_DIR):
             os.makedirs(Config.ICOSA_THUMB_DIR)
 
-    def get_uid_from_thumbnail_url(thumbnail_url):
-        return thumbnail_url.split('/')[4]
-
-    def get_uid_from_model_url(model_url):
+    def get_assetId_from_model_url(model_url):
         try:
             return model_url.split('/')[5]
         except:
-            ShowMessage("ERROR", "Url parsing error", "Error getting uid from url: {}".format(model_url))
+            ShowMessage("ERROR", "Url parsing error", "Error getting assetId from url: {}".format(model_url))
             return None
 
-    def get_uid_from_download_url(model_url):
+    def get_assetId_from_download_url(model_url):
         return model_url.split('/')[6]
 
     def clean_node_hierarchy(objects, root_name):
@@ -269,9 +267,9 @@ class Utils:
         # Select the root Empty node
         root.select_set(True)
 
-    def is_valid_uuid(uuid_to_test, version=4):
+    def is_valid_uid(uid_to_test, version=4):
         try:
-            uuid_obj = UUID(hex=uuid_to_test, version=version)
+            uid_obj = UUID(hex=uid_to_test, version=version)
             return True
         except ValueError:
             return False
@@ -280,7 +278,7 @@ class Cache:
     ICOSA_CACHE_FILE = os.path.join(
         bpy.utils.user_resource("SCRIPTS", path="icosa_cache", create=True),
         ".cache"
-    ) # Use a user path to avoid permission-related errors
+    )  # Use a user path to avoid permission-related errors
 
     def read():
         if not os.path.exists(Cache.ICOSA_CACHE_FILE):
@@ -322,17 +320,14 @@ def get_icosa_props():
 def get_icosa_props_proxy():
     return bpy.context.window_manager.icosa_browser_proxy
 
-def get_icosa_model(uid):
+def get_icosa_model(assetId):
     skfb = get_icosa_props()
-    if "current" in skfb.search_results and uid in skfb.search_results["current"]:
-        return skfb.search_results['current'][uid]
+    if "current" in skfb.search_results and assetId in skfb.search_results["current"]:
+        return skfb.search_results['current'][assetId]
     else:
         return None
 
 def run_default_search():
-    print("-----------------------------------------")
-    print(Config.DEFAULT_SEARCH)
-    print("-----------------------------------------")
     searchthr = GetRequestThread(Config.DEFAULT_SEARCH, parse_results)
     searchthr.start()
 
@@ -358,9 +353,7 @@ def refresh_search(self, context):
         del props.search_results['current']
 
     props.query = pprops.query
-    props.animated = pprops.animated
-    props.pbr = pprops.pbr
-    props.staffpick = pprops.staffpick
+    props.curated = pprops.curated
     props.categories = pprops.categories
     props.face_count = pprops.face_count
     bpy.ops.wm.icosa_search('EXEC_DEFAULT')
@@ -368,13 +361,22 @@ def refresh_search(self, context):
 
 def set_login_status(status_type, status):
     login_props = get_icosa_login_props()
-    login_props.status = status
+    login_props.status = f"xxx: {status}"
     login_props.status_type = status_type
 
 
 def set_import_status(status):
     props = get_icosa_props()
     props.import_status = status
+
+
+# Simple wrapper around requests.get for debugging purposes
+def requests_get(*args, **kwargs):
+    url = args[0]
+    # print("******************************")
+    # print(url)
+    # print("******************************")
+    return requests.get(*args, **kwargs)
 
 
 class IcosaApi:
@@ -424,7 +426,7 @@ class IcosaApi:
         bpy.ops.wm.icosa_search('EXEC_DEFAULT')
 
     def request_user_info(self):
-        requests.get(Config.ICOSA_ME, headers=self.headers, hooks={'response': self.parse_user_info})
+        requests_get(Config.ICOSA_ME, headers=self.headers, hooks={'response': self.parse_user_info})
 
     def get_user_info(self):
         if self.display_name:
@@ -444,37 +446,33 @@ class IcosaApi:
             self.api_token = ''
             self.headers = {}
 
-    def request_thumbnail(self, thumbnails_json, model_uid):
+    def request_thumbnail(self, thumbnails_json, asset_id):
         # Avoid requesting twice the same data
-        if model_uid not in thumbnailsProgress:
-            thumbnailsProgress.add(model_uid)
+        if asset_id not in thumbnailsProgress:
+            thumbnailsProgress.add(asset_id)
             url = Utils.get_thumbnail_url(thumbnails_json)
-            thread = ThumbnailCollector(url)
+            thread = ThumbnailCollector(url, asset_id)
             thread.start()
 
-    def request_model_info(self, uid, callback=None):
-        callback = self.handle_model_info if callback is None else callback
-        url = Config.ICOSA_MODEL + '/' + uid
-
+    def request_model_info(self, asset_id, callback=None):
+        if callback is None:
+            callback = self.handle_model_info
+        callback = functools.partial(callback, asset_id)
+        url = f"{Config.ICOSA_MODEL}/{asset_id}"
         model_infothr = GetRequestThread(url, callback, self.headers)
         model_infothr.start()
 
-    def handle_model_info(self, r, *args, **kwargs):
+    def handle_model_info(self, r, asset_id, *args, **kwargs):
         skfb = get_icosa_props()
-        uid = Utils.get_uid_from_model_url(r.url)
 
         # Dirty fix to avoid processing obsolete result data
-        if 'current' not in skfb.search_results or uid is None or uid not in skfb.search_results['current']:
+        if 'current' not in skfb.search_results or asset_id is None or asset_id not in skfb.search_results['current']:
             return
 
-        model = skfb.search_results['current'][uid]
+        model = skfb.search_results['current'][asset_id]
         json_data = r.json()
         model.license = json_data.get('license', {})
-        if model.license is not None:
-            model.license = model.license.get('fullName', 'Personal (you own this model)')
-        anim_count = int(json_data.get('animationCount', 0))
-        model.animated = 'Yes ({} animation(s))'.format(anim_count) if anim_count > 0 else 'No'
-        skfb.search_results['current'][uid] = model
+        skfb.search_results['current'][asset_id] = model
 
     def search(self, query, search_cb):
         skfb = get_icosa_props()
@@ -489,9 +487,9 @@ class IcosaApi:
             searchthr.start()
 
     def search_cursor(self, url, search_cb):
-        requests.get(url, headers=self.headers, hooks={'response': search_cb})
+        requests_get(url, headers=self.headers, hooks={'response': search_cb})
 
-    def write_model_info(self, title, author, authorUrl, license, uid):
+    def write_model_info(self, title, author, authorUrl, license, assetId):
         try:
             downloadHistory = bpy.context.preferences.addons[__name__.split('.')[0]].preferences.downloadHistory
             if downloadHistory != "":
@@ -502,12 +500,12 @@ class IcosaApi:
                 with open(downloadHistory, 'a+') as f:
                     if createFile:
                         f.write("Model name, Author name, Author url, License, Model link,\n")
-                    f.write("{}, {}, https://icosa.gallery/{}, {}, https://icosa.gallery/models/{},\n".format(
+                    f.write("{}, {}, https://icosa.gallery/{}, {}, https://icosa.gallery/view/{},\n".format(
                         title.replace(",", " "),
                         author.replace(",", " "),
                         authorUrl.replace(",", " "),
                         license.replace(",", " "),
-                        uid
+                        assetId
                     ))
         except:
             print("Error encountered while saving data to history file")
@@ -516,46 +514,46 @@ class IcosaApi:
         try:
             if r.status_code == 200:
                 result = r.json()
-                title = result['name']
-                author = result['user']['displayName']
-                username = result['user']['username']
-                license = result["license"]["label"]
-                uid = result['uid']
-                self.write_model_info(title, author, username, license, uid)
+                title = result['displayName']
+                author = result['authorName']
+                username = result['authorId']
+                license = result["license"]
+                assetId = result['assetId']
+                self.write_model_info(title, author, username, license, assetId)
             else:
                 print("Error encountered while getting model info ({})\n{}\n{}".format(r.status_code, r.url, str(r.json())))
         except:
             print("Error encountered while parsing model info request: {}".format(r.url))
 
-    def download_model(self, uid):
-        skfb_model = get_icosa_model(uid)
-        if skfb_model is not None: # The model comes from the search results
+    def download_model(self, asset_id):
+        skfb_model = get_icosa_model(asset_id)
+        if skfb_model is not None:  # The model comes from the search results
             if skfb_model.download_url and (time.time() - skfb_model.time_url_requested < skfb_model.url_expires):
                 self.get_archive(skfb_model.download_url)
             else:
                 skfb_model.download_url = None
                 skfb_model.url_expires = None
                 skfb_model.time_url_requested = None
-                self.write_model_info(skfb_model.title, skfb_model.author, skfb_model.username, skfb_model.license, uid)
-                requests.get(Utils.build_download_url(uid), headers=self.headers, hooks={'response': self.handle_download})
-        else: # Model comes from a direct link
+                self.write_model_info(skfb_model.title, skfb_model.author, skfb_model.username, skfb_model.license, asset_id)
+                requests_get(Utils.build_download_url(asset_id), headers=self.headers, hooks={'response': self.handle_download})
+        else:  # Model comes from a direct link
             skfb = get_icosa_props()
-            download_url = Utils.build_download_url(uid)
-            requests.get('{}/{}'.format(Config.ICOSA_MODEL, uid), headers=skfb.skfb_api.headers, hooks={'response': self.parse_model_info_request})
-            requests.get(download_url, headers=self.headers, hooks={'response': self.handle_download})
+            download_url = Utils.build_download_url(asset_id)
+            requests_get('{}/{}'.format(Config.ICOSA_MODEL, asset_id), headers=skfb.skfb_api.headers, hooks={'response': self.parse_model_info_request})
+            requests_get(download_url, headers=self.headers, hooks={'response': self.handle_download})
 
     def handle_download(self, r, *args, **kwargs):
         if r.status_code != 200 or 'gltf' not in r.json():
-            ShowMessage("ERROR", "This model is not downloadable", "Make sure your account has enough rights to download the model")
+            ShowMessage("ERROR", "This model is not downloadable", "TODO: Add more information")
             return
 
         skfb = get_icosa_props()
-        uid = Utils.get_uid_from_model_url(r.url)
-        if uid is None:
+        assetId = Utils.get_assetId_from_model_url(r.url)
+        if assetId is None:
             return
 
         gltf = r.json()['gltf']
-        skfb_model = get_icosa_model(uid)
+        skfb_model = get_icosa_model(assetId)
 
         # If the model name is not known at this step, we could try to do an additional API call to get it
         # This can happen when the user chose to import a model from its url
@@ -568,13 +566,13 @@ class IcosaApi:
             print('Url is None')
             return
 
-        r = requests.get(url, stream=True)
-        uid = Utils.get_uid_from_download_url(url)
-        temp_dir = os.path.join(Config.ICOSA_MODEL_DIR, uid)
+        r = requests_get(url, stream=True)
+        assetId = Utils.get_assetId_from_download_url(url)
+        temp_dir = os.path.join(Config.ICOSA_MODEL_DIR, assetId)
         if not os.path.exists(temp_dir):
             os.makedirs(temp_dir)
 
-        archive_path = os.path.join(temp_dir, '{}.zip'.format(uid))
+        archive_path = os.path.join(temp_dir, '{}.zip'.format(assetId))
         if not os.path.exists(archive_path):
             wm = bpy.context.window_manager
             wm.progress_begin(0, 100)
@@ -600,15 +598,16 @@ class IcosaApi:
         gltf_path, gltf_zip = unzip_archive(archive_path)
         if gltf_path:
             try:
-                import_model(gltf_path, uid, title)
+                import_model(gltf_path, assetId, title)
             except Exception as e:
                 import traceback
                 print(traceback.format_exc())
         else:
             ShowMessage("ERROR", "Download error", "Failed to download model (url might be invalid)")
-            model = get_icosa_model(uid)
+            model = get_icosa_model(assetId)
             set_import_status("Import model ({})".format(model.download_size if model.download_size else 'fetching data'))
         return
+
 
 class IcosaLoginProps(bpy.types.PropertyGroup):
     def update_tr(self, context):
@@ -669,9 +668,11 @@ class IcosaLoginProps(bpy.types.PropertyGroup):
     status: StringProperty(name='', default='')
     status_type: EnumProperty(
             name="Login status type",
-            items=(('ERROR', "Error", ""),
-                       ('INFO', "Information", ""),
-                       ('FILE_REFRESH', "Progress", "")),
+            items=(
+                ('ERROR', "Error", ""),
+                ('INFO', "Information", ""),
+                ('FILE_REFRESH', "Progress", "")
+            ),
             description="Determines which icon to use",
             default='FILE_REFRESH'
             )
@@ -699,13 +700,6 @@ class IcosaBrowserPropsProxy(bpy.types.PropertyGroup):
             options={'SKIP_SAVE'}
             )
 
-    pbr: BoolProperty(
-            name="PBR",
-            description="Search for PBR model only",
-            default=False,
-            update=refresh_search,
-            )
-
     categories: EnumProperty(
             name="Categories",
             items=Config.ICOSA_CATEGORIES,
@@ -728,16 +722,9 @@ class IcosaBrowserPropsProxy(bpy.types.PropertyGroup):
             update=refresh_search,
             )
 
-    animated: BoolProperty(
-            name="Animated",
-            description="Show only models with animation",
-            default=False,
-            update=refresh_search
-            )
-
-    staffpick: BoolProperty(
-            name="Staffpick",
-            description="Show only staffpick models",
+    curated: BoolProperty(
+            name="Curated",
+            description="Show only curated models",
             default=False,
             update=refresh_search
             )
@@ -765,12 +752,6 @@ class IcosaBrowserProps(bpy.types.PropertyGroup):
             default=""
             )
 
-    pbr: BoolProperty(
-            name="PBR",
-            description="Search for PBR model only",
-            default=False
-            )
-
     categories: EnumProperty(
             name="Categories",
             items=Config.ICOSA_CATEGORIES,
@@ -791,15 +772,9 @@ class IcosaBrowserProps(bpy.types.PropertyGroup):
             description="Sort ",
             )
 
-    animated: BoolProperty(
-            name="Animated",
-            description="Show only models with animation",
-            default=False,
-            )
-
-    staffpick: BoolProperty(
-            name="Staffpick",
-            description="Show only staffpick models",
+    curated: BoolProperty(
+            name="Curated",
+            description="Show only curated models",
             default=False,
             )
 
@@ -860,10 +835,10 @@ def list_current_results(self, context):
         for i, result in enumerate(skfb_results):
             if result in skfb_results:
                 model = skfb_results[result]
-                if model.uid in skfb.custom_icons:
-                    res.append((model.uid, model.title, "", skfb.custom_icons[model.uid].icon_id, i))
+                if model.assetId in skfb.custom_icons:
+                    res.append((model.assetId, model.title, "", skfb.custom_icons[model.assetId].icon_id, i))
                 else:
-                    res.append((model.uid, model.title, "", preview_collection['skfb']['0'].icon_id, i))
+                    res.append((model.assetId, model.title, "", preview_collection['skfb']['0'].icon_id, i))
                     missing_thumbnail = True
             else:
                 print('Result issue')
@@ -885,7 +860,7 @@ def draw_model_info(layout, model, context):
 
     row = ui_model_props.row()
     row.label(text="{}".format(model.title), icon='OBJECT_DATA')
-    row.operator("wm.icosa_view", text="", icon='LINKED').model_uid = model.uid
+    row.operator("wm.icosa_view", text="", icon='LINKED').model_assetId = model.assetId
     
     ui_model_props.label(text='{}'.format(model.author), icon='ARMATURE_DATA')
 
@@ -894,12 +869,10 @@ def draw_model_info(layout, model, context):
     else:
         ui_model_props.label(text='Fetching..')
 
-    if model.vertex_count and model.face_count:
+    if model.face_count:
         ui_model_stats = ui_model_props.row()
-        ui_model_stats.label(text='Verts: {}  |  Faces: {}'.format(Utils.humanify_number(model.vertex_count), Utils.humanify_number(model.face_count)), icon='MESH_DATA')
+        ui_model_stats.label(text='Faces: {}'.format(Utils.humanify_number(model.face_count)), icon='MESH_DATA')
 
-    if(model.animated):
-        ui_model_props.label(text='Animated: ' + model.animated, icon='ANIM_DATA')
 
     layout.separator()
 
@@ -908,7 +881,7 @@ def draw_import_button(layout, model, context):
     import_ops = layout.row()
     skfb = get_icosa_props()
 
-    import_ops.enabled = skfb.skfb_api.is_user_logged() and bpy.context.mode == 'OBJECT' and Utils.is_valid_uuid(model.uid)
+    import_ops.enabled = skfb.skfb_api.is_user_logged() and bpy.context.mode == 'OBJECT' and Utils.is_valid_uid(model.assetId)
     if not skfb.skfb_api.is_user_logged():
         downloadlabel = 'Log in to download models'
     elif bpy.context.mode != 'OBJECT':
@@ -922,10 +895,10 @@ def draw_import_button(layout, model, context):
 
     download_icon = 'IMPORT' if import_ops.enabled else 'INFO'
     import_ops.scale_y = 2.0
-    import_ops.operator("wm.icosa_download", icon=download_icon, text=downloadlabel, translate=False, emboss=True).model_uid = model.uid
+    import_ops.operator("wm.icosa_download", icon=download_icon, text=downloadlabel, translate=False, emboss=True).model_assetId = model.assetId
 
 def set_log(log):
-    get_icosa_props().status = log
+    get_icosa_props().status = f"log: {log}"
 
 def unzip_archive(archive_path):
     if os.path.exists(archive_path):
@@ -963,18 +936,15 @@ def run_async(func):
     return async_func
 
 
-def import_model(gltf_path, uid, title):
-    bpy.ops.wm.import_modal('INVOKE_DEFAULT', gltf_path=gltf_path, uid=uid, title=title)
+def import_model(gltf_path, assetId, title):
+    bpy.ops.wm.import_modal('INVOKE_DEFAULT', gltf_path=gltf_path, assetId=assetId, title=title)
 
 
-def build_search_request(query, pbr, animated, staffpick, face_count, category, sort_by):
+def build_search_request(query, curated, face_count, category, sort_by):
     final_query = '&q={}'.format(query) if query else ''
 
-    if animated:
-        final_query = final_query + '&animated=true'
-
-    if staffpick:
-        final_query = final_query + '&staffpicked=true'
+    if curated:
+        final_query = final_query + '&curated=true'
 
     if sort_by == 'LIKES':
         final_query = final_query + '&sort_by=-likeCount'
@@ -997,9 +967,6 @@ def build_search_request(query, pbr, animated, staffpick, face_count, category, 
     if category != 'ALL':
         final_query = final_query + '&categories={}'.format(category)
 
-    if pbr:
-        final_query = final_query + '&pbr_type=metalness'
-
     return final_query
 
 
@@ -1016,23 +983,23 @@ def parse_results(r, *args, **kwargs):
 
     skfb.search_results['current'] = OrderedDict()
 
-    for result in list(json_data.get('results', [])):
+    for result in list(json_data.get('assets', [])):
 
         # Dirty fix to avoid parsing obsolete data
         if 'current' not in skfb.search_results:
             return
 
-        uid = result['uid']
-        skfb.search_results['current'][result['uid']] = IcosaModel(result)
+        assetId = result['assetId']
+        skfb.search_results['current'][result['assetId']] = IcosaModel(result)
 
-        if not os.path.exists(os.path.join(Config.ICOSA_THUMB_DIR, uid) + '.jpeg'):
-            skfb.skfb_api.request_thumbnail(result['thumbnails'], uid)
-        elif uid not in skfb.custom_icons:
-            skfb.custom_icons.load(uid, os.path.join(Config.ICOSA_THUMB_DIR, "{}.jpeg".format(uid)), 'IMAGE')
+        if not os.path.exists(os.path.join(Config.ICOSA_THUMB_DIR, assetId) + '.png'):
+            skfb.skfb_api.request_thumbnail(result['thumbnail'], assetId)
+        elif assetId not in skfb.custom_icons:
+            skfb.custom_icons.load(assetId, os.path.join(Config.ICOSA_THUMB_DIR, "{}.png".format(assetId)), 'IMAGE')
 
         # Make a request to get the download_size for own models
         """
-        model = skfb.search_results['current'][result['uid']]
+        model = skfb.search_results['current'][result['assetId']]
         if model.download_size is None:
             api = skfb.skfb_api
             def set_download_size(r, *args, **kwargs):
@@ -1040,30 +1007,31 @@ def parse_results(r, *args, **kwargs):
                 print(json_data)
                 if 'gltf' in json_data and 'size' in json_data['gltf']:
                     model.download_size = Utils.humanify_size(json_data['gltf']['size'])
-            requests.get(Utils.build_download_url(uid), headers=api.headers, hooks={'response': set_download_size})
+            requests_get(Utils.build_download_url(assetId), headers=api.headers, hooks={'response': set_download_size})
         """
 
-    if json_data['page_token']:
+    if json_data['nextPageToken']:
         current_url = r.url
         # Parse the URL and remove the page_token parameter
         parsed_url = urllib.parse.urlparse(current_url)
         query_params = urllib.parse.parse_qs(parsed_url.query)
-        query_params.pop('page_token', None)
+        query_params.pop('pageToken', None)
         url_without_page_token = urllib.parse.urlunparse(
             parsed_url._replace(query=urllib.parse.urlencode(query_params, doseq=True)))
-        next_page = int(json_data['page_token'])
-        skfb.skfb_api.next_results_url = f"{url_without_page_token}&page_token={next_page}"
-        # This assumees page_tokens are sequential integers
+        next_page = int(json_data['nextPageToken'])
+        skfb.skfb_api.next_results_url = f"{url_without_page_token}&pageToken={next_page}"
+        # This assumes page tokens are sequential integers
         # Currently true, but might change in the future
-        skfb.skfb_api.prev_results_url = f"{url_without_page_token}&page_token={next_page - 1}"
+        skfb.skfb_api.prev_results_url = f"{url_without_page_token}&pageToken={next_page - 1}"
     else:
         skfb.skfb_api.next_results_url = None
         skfb.skfb_api.prev_results_url = None
 
 
 class ThumbnailCollector(threading.Thread):
-    def __init__(self, url):
+    def __init__(self, url, asset_id):
         self.url = url
+        self.asset_id = asset_id
         threading.Thread.__init__(self)
 
     def set_url(self, url):
@@ -1072,16 +1040,15 @@ class ThumbnailCollector(threading.Thread):
     def run(self):
         if not self.url:
             return
-        requests.get(self.url, stream=True, hooks={'response': self.handle_thumbnail})
+        requests_get(self.url, stream=True, hooks={'response': self.handle_thumbnail})
 
     def handle_thumbnail(self, r, *args, **kwargs):
-        uid = r.url.split('/')[4]
         if not os.path.exists(Config.ICOSA_THUMB_DIR):
             try:
                 os.makedirs(Config.ICOSA_THUMB_DIR)
             except:
                 pass
-        thumbnail_path = os.path.join(Config.ICOSA_THUMB_DIR, uid) + '.jpeg'
+        thumbnail_path = os.path.join(Config.ICOSA_THUMB_DIR, self.asset_id) + '.png'
 
         with open(thumbnail_path, "wb") as f:
             total_length = r.headers.get('content-length')
@@ -1095,11 +1062,11 @@ class ThumbnailCollector(threading.Thread):
                     dl += len(data)
                     f.write(data)
 
-        thumbnailsProgress.discard(uid)
+        thumbnailsProgress.discard(self.asset_id)
 
         props = get_icosa_props()
-        if uid not in props.custom_icons:
-            props.custom_icons.load(uid, os.path.join(Config.ICOSA_THUMB_DIR, "{}.jpeg".format(uid)), 'IMAGE')
+        if self.asset_id not in props.custom_icons:
+            props.custom_icons.load(self.asset_id, os.path.join(Config.ICOSA_THUMB_DIR, "{}.png".format(self.asset_id)), 'IMAGE')
 
 
 class LoginModal(bpy.types.Operator):
@@ -1148,7 +1115,7 @@ class LoginModal(bpy.types.Operator):
             browser_props.skfb_api.request_user_info()
 
         else:
-            set_login_status(f'ERROR {r.status_code}', f'Device code failed: {r.text}')
+            set_login_status(f'ERROR', f'Device code failed: {r.status_code} {r.text}')
             print('Cannot login.\n {}'.format(r.json()))
 
         self.is_logging = False
@@ -1167,7 +1134,7 @@ class LoginModal(bpy.types.Operator):
     def modal(self, context, event):
         if self.error:
             self.error = False
-            set_login_status('ERROR', '{}'.format(self.error_message))
+            set_login_status('ERROR', 'Modal: {}'.format(self.error_message))
             return {"FINISHED"}
 
         if self.is_logging:
@@ -1192,7 +1159,9 @@ class LoginModal(bpy.types.Operator):
             #     requests.post(Config.ICOSA_EMAIL_AUTH, data=data, hooks={'response': self.handle_mail_login})
 
             if login_props.use_device_code:
-                requests.post(f"{Config.ICOSA_DEVICE_AUTH}?device_code={login_props.device_code}", hooks={'response': self.handle_device_login})
+                url = f"{Config.ICOSA_DEVICE_AUTH}?device_code={login_props.device_code}"
+                print(url)
+                requests_get(url, hooks={'response': self.handle_device_login})
 
             else:
                 self.handle_token_login(login_props.api_token)
@@ -1210,7 +1179,7 @@ class ImportModalOperator(bpy.types.Operator):
     bl_options = {'INTERNAL'}
 
     gltf_path: StringProperty()
-    uid: StringProperty()
+    assetId: StringProperty()
     title: StringProperty()
 
     def execute(self, context):
@@ -1224,7 +1193,7 @@ class ImportModalOperator(bpy.types.Operator):
             old_objects = [o.name for o in bpy.data.objects] # Get the current objects inorder to find the new node hierarchy
             bpy.ops.import_scene.gltf(filepath=self.gltf_path)
             set_import_status('')
-            Utils.clean_downloaded_model_dir(self.uid)
+            Utils.clean_downloaded_model_dir(self.assetId)
             Utils.clean_node_hierarchy([o for o in bpy.data.objects if o.name not in old_objects], self.title)
             return {'FINISHED'}
         except Exception:
@@ -1247,7 +1216,7 @@ class GetRequestThread(threading.Thread):
         threading.Thread.__init__(self)
 
     def run(self):
-        requests.get(self.url, headers=self.headers, hooks={'response': self.callback})
+        requests_get(self.url, headers=self.headers, hooks={'response': self.callback})
 
 
 class View3DPanel:
@@ -1311,9 +1280,13 @@ class LoginPanel(View3DPanel, bpy.types.Panel):
                 layout.label(text="Login to your Icosa Gallery account", icon='INFO')
                 ops_row = layout.row()
                 ops_row.operator('wm.icosa_signup', text='Create an account', icon='PLUS')
+
                 # Disabled for now
                 # layout.prop(skfb_login, "use_mail")
-                layout.prop(skfb_login, "use_device_code")
+
+                # The only option so no need for a checkbox
+                # layout.prop(skfb_login, "use_device_code")
+
                 if skfb_login.use_mail:
                     layout.prop(skfb_login, "email")
                     layout.prop(skfb_login, "password")
@@ -1323,7 +1296,7 @@ class LoginPanel(View3DPanel, bpy.types.Panel):
                     layout.prop(skfb_login, "device_code")
                 else:
                     layout.prop(skfb_login, "api_token")
-                login_icon = "LINKED" if bpy.app.version < (2,80,0) else "USER"
+                login_icon = "LINKED" if bpy.app.version < (2, 80, 0) else "USER"
                 ops_row = layout.row()
                 ops_row.operator('wm.icosa_login', text='Log in', icon=login_icon).authenticate = True
                 if skfb_login.status:
@@ -1331,8 +1304,8 @@ class LoginPanel(View3DPanel, bpy.types.Panel):
 
 
 class Model:
-    def __init__(self, _uid):
-        self.uid = _uid
+    def __init__(self, _assetId):
+        self.assetId = _assetId
         self.download_size = 0
 
 
@@ -1340,7 +1313,7 @@ class IcosaBrowse(View3DPanel, bpy.types.Panel):
     bl_idname = "VIEW3D_PT_icosa_browse"
     bl_label = "Import"
 
-    uid   = ''
+    assetId   = ''
     label = "Search results"
 
     def draw_search(self, layout, context):
@@ -1348,7 +1321,7 @@ class IcosaBrowse(View3DPanel, bpy.types.Panel):
         props = get_icosa_props_proxy()
         skfb_api = prop.skfb_api
 
-        # Add an option to import from url or uid
+        # Add an option to import from url or assetId
         col = layout.box().column(align=True)
         row = col.row()
         row.prop(prop, "manualImportBoolean")
@@ -1384,9 +1357,7 @@ class IcosaBrowse(View3DPanel, bpy.types.Panel):
                     col.prop(props, "sort_by")
                     col.prop(props, "face_count")
                     row = col.row()
-                    row.prop(props, "pbr")
-                    row.prop(props, "staffpick")
-                    row.prop(props, "animated")
+                    row.prop(props, "curated")
                 else:
                     col.separator()
                     col.prop(props, "sort_by")
@@ -1438,20 +1409,20 @@ class IcosaBrowse(View3DPanel, bpy.types.Panel):
                 if not model:
                     return
 
-                if self.uid != model.uid:
-                    self.uid = model.uid
+                if self.assetId != model.assetId:
+                    self.assetId = model.assetId
 
                     if not model.info_requested:
-                        props.skfb_api.request_model_info(model.uid)
+                        props.skfb_api.request_model_info(model.assetId)
                         model.info_requested = True
 
                 draw_model_info(col, model, context)
                 draw_import_button(col, model, context)
         else:
-            uid = ""
+            assetId = ""
             if "icosa.gallery" in props.manualImportPath:
-                uid = props.manualImportPath[-32:]
-            m = Model(uid)
+                assetId = props.manualImportPath[-32:]
+            m = Model(assetId)
             draw_import_button(col, m, context)
 
     def draw(self, context):
@@ -1541,12 +1512,11 @@ class IcosaLogger(bpy.types.Operator):
 
 class IcosaModel:
     def __init__(self, json_data):
-        self.title = str(json_data['name'])
-        self.author = json_data['user']['displayName']
-        self.username = json_data['user']['username']
-        self.uid = json_data['uid']
-        self.vertex_count = json_data['vertexCount']
-        self.face_count = json_data['faceCount']
+        self.title = str(json_data['displayName'])
+        self.author = json_data['authorName']
+        self.username = json_data['authorId']
+        self.assetId = json_data['assetId']
+        self.face_count = json_data['triangleCount']
 
         if 'archives' in json_data and  'gltf' in json_data['archives']:
             if 'size' in json_data['archives']['gltf'] and json_data['archives']['gltf']['size']:
@@ -1554,12 +1524,11 @@ class IcosaModel:
         else:
             self.download_size = None
 
-        self.thumbnail_url = os.path.join(Config.ICOSA_THUMB_DIR, '{}.jpeg'.format(self.uid))
+        self.thumbnail_url = os.path.join(Config.ICOSA_THUMB_DIR, '{}.png'.format(self.assetId))
 
         # Model info request
         self.info_requested = False
         self.license = None
-        self.animated = False
 
         # Download url data
         self.download_url = None
@@ -1567,10 +1536,11 @@ class IcosaModel:
         self.url_expires = None
 
 def ShowMessage(icon = "INFO", title = "Info", message = "Information"):
-    def draw(self, context):
-        self.layout.label(text=message)
-    print("\n{}: {}".format(icon, message))
-    bpy.context.window_manager.popup_menu(draw, title = title, icon = icon)
+    pass
+    # def draw(self, context):
+    #     self.layout.label(text=message)
+    # print("\n{}: {}".format(icon, message))
+    # bpy.context.window_manager.popup_menu(draw, title = title, icon = icon)
 
 
 class IcosaDownloadModel(bpy.types.Operator):
@@ -1579,11 +1549,11 @@ class IcosaDownloadModel(bpy.types.Operator):
     bl_label = "Downloading"
     bl_options = {'INTERNAL'}
 
-    model_uid: bpy.props.StringProperty(name="uid")
+    model_assetId: bpy.props.StringProperty(name="assetId")
 
     def execute(self, context):
         skfb_api = context.window_manager.icosa_browser.skfb_api
-        skfb_api.download_model(self.model_uid)
+        skfb_api.download_model(self.model_assetId)
         return {'FINISHED'}
 
 
@@ -1593,11 +1563,11 @@ class ViewOnIcosaGallery(bpy.types.Operator):
     bl_label = "View the model on Icosa Gallery"
     bl_options = {'INTERNAL'}
 
-    model_uid: bpy.props.StringProperty(name="uid")
+    model_assetId: bpy.props.StringProperty(name="assetId")
 
     def execute(self, context):
         import webbrowser
-        webbrowser.open('{}/models/{}'.format(Config.ICOSA_URL, self.model_uid))
+        webbrowser.open('{}/view/{}'.format(Config.ICOSA_URL, self.model_assetId))
         return {'FINISHED'}
 
 
@@ -1623,7 +1593,7 @@ class IcosaSearch(bpy.types.Operator):
         skfb = get_icosa_props()
         skfb.skfb_api.prev_results_url = None
         skfb.skfb_api.next_results_url = None
-        final_query = build_search_request(skfb.query, skfb.pbr, skfb.animated, skfb.staffpick, skfb.face_count, skfb.categories, skfb.sort_by)
+        final_query = build_search_request(skfb.query, skfb.curated, skfb.face_count, skfb.categories, skfb.sort_by)
         skfb.skfb_api.search(final_query, parse_results)
         return {'FINISHED'}
 
@@ -1741,10 +1711,11 @@ def activate_plugin():
     global is_plugin_enabled
     is_plugin_enabled = True
 
-    try:
-        requests.get(Config.ICOSA_PLUGIN_VERSION, hooks={'response': check_plugin_version})
-    except Exception as e:
-        print('Error when checking for version: {}'.format(e))
+    # TODO Implement a version check
+    # try:
+    #     requests_get(Config.ICOSA_PLUGIN_VERSION, hooks={'response': check_plugin_version})
+    # except Exception as e:
+    #     print('Error when checking for version: {}'.format(e))
 
     run_default_search()
 
@@ -1891,18 +1862,18 @@ def upload(filepath, filename):
         if "icosa.gallery/" not in props.reuploadPath:
             return upload_report("reupload url is malformed %s" % props.reuploadPath, 'ERROR')
 
-        # Get the model uid
+        # Get the model assetId
         try:
             modelUid = props.reuploadPath[-32:]
-            if not Utils.is_valid_uuid(modelUid):
-                return upload_report("reupload url does not end with a valid uid (32 characters string): %s" % props.reuploadPath, 'ERROR')
+            if not Utils.is_valid_uid(modelUid):
+                return upload_report("reupload url does not end with a valid assetId (32 characters string): %s" % props.reuploadPath, 'ERROR')
         except:
             return upload_report("reupload url is malformed %s" % props.reuploadPath, 'ERROR')
 
         uploadUrl = '{}/{}'.format(Config.ICOSA_MODEL, modelUid)
 
         _data = {
-            "uid": modelUid,
+            "assetId": modelUid,
             "source": "blender-exporter"
         }
 
@@ -1927,9 +1898,9 @@ def upload(filepath, filename):
     else:
         try:
             result = r.json()
-            sf_state.model_url = Config.ICOSA_URL + "/models/" + result["uid"]
+            sf_state.model_url = Config.ICOSA_URL + "/view/" + result["assetId"]
         except:
-            sf_state.model_url = Config.ICOSA_URL + "/models/" + modelUid
+            sf_state.model_url = Config.ICOSA_URL + "/view/" + modelUid
         return upload_report("Upload complete. Available on your icosa.gallery dashboard.", 'INFO')
 
 
@@ -2144,22 +2115,23 @@ classes = (
     ExportIcosa,
     )
 
-def check_plugin_version(request, *args, **kwargs):
-    response = request.json()
-    skfb = get_icosa_props()
-    if response and len(response):
-        latest_release_version = response[0]['tag_name'].replace('.', '')
-        current_version = str(bl_info['version']).replace(',', '').replace('(', '').replace(')', '').replace(' ', '')
-
-        if latest_release_version == current_version:
-            print('You are using the latest version({})'.format(response[0]['tag_name']))
-            skfb.is_latest_version = 1
-        else:
-            print('A new version is available: {}'.format(response[0]['tag_name']))
-            skfb.is_latest_version = 0
-    else:
-        print('Failed to retrieve plugin version')
-        skfb.is_latest_version = -2
+# TODO
+# def check_plugin_version(request, *args, **kwargs):
+#     response = request.json()
+#     skfb = get_icosa_props()
+#     if response and len(response):
+#         latest_release_version = response[0]['tag_name'].replace('.', '')
+#         current_version = str(bl_info['version']).replace(',', '').replace('(', '').replace(')', '').replace(' ', '')
+#
+#         if latest_release_version == current_version:
+#             print('You are using the latest version({})'.format(response[0]['tag_name']))
+#             skfb.is_latest_version = 1
+#         else:
+#             print('A new version is available: {}'.format(response[0]['tag_name']))
+#             skfb.is_latest_version = 0
+#     else:
+#         print('Failed to retrieve plugin version')
+#         skfb.is_latest_version = -2
 
 def register():
     icosa_icon = bpy.utils.previews.new()
@@ -2176,19 +2148,10 @@ def register():
     for cls in classes:
         bpy.utils.register_class(cls)
 
-    bpy.types.WindowManager.icosa_browser = PointerProperty(
-                type=IcosaBrowserProps)
-
-    bpy.types.WindowManager.icosa_browser_proxy = PointerProperty(
-                type=IcosaBrowserPropsProxy)
-
-    bpy.types.WindowManager.icosa_api = PointerProperty(
-                type=IcosaLoginProps,
-                )
-
-    bpy.types.WindowManager.icosa_export = PointerProperty(
-                type=IcosaExportProps,
-                )
+    bpy.types.WindowManager.icosa_browser = PointerProperty(type=IcosaBrowserProps)
+    bpy.types.WindowManager.icosa_browser_proxy = PointerProperty(type=IcosaBrowserPropsProxy)
+    bpy.types.WindowManager.icosa_api = PointerProperty(type=IcosaLoginProps)
+    bpy.types.WindowManager.icosa_export = PointerProperty(type=IcosaExportProps)
 
     # If a cache path was set in preferences, use it
     updateCacheDirectory(None, context=bpy.context)
