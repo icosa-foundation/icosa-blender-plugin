@@ -183,9 +183,6 @@ class Utils:
         readable = round(readable, 2)
         return '{}{}'.format(readable, suffix)
 
-    def build_download_url(asset_id):
-        return '{}/{}/download'.format(Config.ICOSA_MODEL, asset_id)
-
     def thumbnail_file_exists(asset_id):
         return os.path.exists(os.path.join(Config.ICOSA_THUMB_DIR, '{}.png'.format(asset_id)))
 
@@ -317,12 +314,14 @@ def get_icosa_props():
 def get_icosa_props_proxy():
     return bpy.context.window_manager.icosa_browser_proxy
 
+
 def get_icosa_model(asset_id):
     skfb = get_icosa_props()
     if "current" in skfb.search_results and asset_id in skfb.search_results["current"]:
         return skfb.search_results['current'][asset_id]
     else:
         return None
+
 
 def run_default_search():
     searchthr = GetRequestThread(Config.DEFAULT_SEARCH, parse_results)
@@ -369,10 +368,15 @@ def set_import_status(status):
 
 # Simple wrapper around requests.get for debugging purposes
 def requests_get(*args, **kwargs):
+    url = args[0]
+    print("______________________________")
+    print(url)
+    print("-----------------------------")
     return requests.get(*args, **kwargs)
 
 
 class IcosaApi:
+
     def __init__(self):
         self.access_token = ''
         self.api_token = ''
@@ -482,7 +486,7 @@ class IcosaApi:
     def search_cursor(self, url, search_cb):
         requests_get(url, headers=self.headers, hooks={'response': search_cb})
 
-    def write_model_info(self, title, author, authorUrl, license, asset_id):
+    def write_model_info(self, title, author, author_url, _license, asset_id):
         try:
             downloadHistory = bpy.context.preferences.addons[__name__.split('.')[0]].preferences.downloadHistory
             if downloadHistory != "":
@@ -496,8 +500,8 @@ class IcosaApi:
                     f.write("{}, {}, https://icosa.gallery/{}, {}, https://icosa.gallery/view/{},\n".format(
                         title.replace(",", " "),
                         author.replace(",", " "),
-                        authorUrl.replace(",", " "),
-                        license.replace(",", " "),
+                        author_url.replace(",", " "),
+                        _license.replace(",", " "),
                         asset_id
                     ))
         except:
@@ -507,12 +511,12 @@ class IcosaApi:
         try:
             if r.status_code == 200:
                 result = r.json()
-                title = result['displayName']
-                author = result['authorName']
-                username = result['authorId']
-                license = result["license"]
-                asset_id = result['assetId']
-                self.write_model_info(title, author, username, license, asset_id)
+                _title = result['displayName']
+                _author = result['authorName']
+                _username = result['authorId']
+                _license = result["license"]
+                _asset_id = result['assetId']
+                self.write_model_info(_title, _author, _username, _license, _asset_id)
             else:
                 print("Error encountered while getting model info ({})\n{}\n{}".format(r.status_code, r.url, str(r.json())))
         except:
@@ -520,17 +524,21 @@ class IcosaApi:
 
     def download_model(self, asset_id):
         skfb_model = get_icosa_model(asset_id)
+        print("skfb_model: ", skfb_model)
         if skfb_model is not None:  # The model comes from the search results
-            if skfb_model.download_url and (time.time() - skfb_model.time_url_requested < skfb_model.url_expires):
-                self.get_archive(skfb_model.download_url, asset_id)
-            else:
-                skfb_model.download_url = None
-                skfb_model.url_expires = None
-                skfb_model.time_url_requested = None
-                self.write_model_info(skfb_model.title, skfb_model.author, skfb_model.username, skfb_model.license, asset_id)
-                requests_get(Utils.build_download_url(asset_id), headers=self.headers, hooks={'response': self.handle_download})
+
+            if skfb_model.download_url:  # TODO handle expiration: and (time.time() - skfb_model.time_url_requested < skfb_model.url_expires):
+                self.get_archive(skfb_model.download_url, asset_id, skfb_model.title)
+            # TODO: Will download_url ever be empty now?
+            # else:
+            #     skfb_model.download_url = None
+            #     skfb_model.url_expires = None
+            #     skfb_model.time_url_requested = None
+            #     self.write_model_info(skfb_model.title, skfb_model.author, skfb_model.username, skfb_model.license, asset_id)
+            #     requests_get(Utils.build_download_url(asset_id), headers=self.headers, hooks={'response': self.handle_download})
         else:  # Model comes from a direct link
             skfb = get_icosa_props()
+            # TODO
             download_url = Utils.build_download_url(asset_id)
             requests_get('{}/{}'.format(Config.ICOSA_MODEL, asset_id), headers=skfb.skfb_api.headers, hooks={'response': self.parse_model_info_request})
             requests_get(download_url, headers=self.headers, hooks={'response': self.handle_download})
@@ -873,7 +881,7 @@ def draw_import_button(layout, model, context):
     import_ops = layout.row()
     skfb = get_icosa_props()
 
-    import_ops.enabled = skfb.skfb_api.is_user_logged() and bpy.context.mode == 'OBJECT' and Utils.is_valid_uid(model.asset_id)
+    import_ops.enabled = skfb.skfb_api.is_user_logged() and bpy.context.mode == 'OBJECT'
     if not skfb.skfb_api.is_user_logged():
         downloadlabel = 'Log in to download models'
     elif bpy.context.mode != 'OBJECT':
@@ -1407,7 +1415,8 @@ class IcosaBrowse(View3DPanel, bpy.types.Panel):
                     self.asset_id = model.asset_id
 
                     if not model.info_requested:
-                        props.skfb_api.request_model_info(model.asset_id)
+                        # TODO
+                        # props.skfb_api.request_model_info(model.asset_id)
                         model.info_requested = True
 
                 draw_model_info(col, model, context)
@@ -1511,30 +1520,33 @@ class IcosaModel:
         self.username = json_data['authorId']
         self.asset_id = json_data['assetId']
         self.face_count = json_data['triangleCount']
+        self.license = json_data['license']
 
-        if 'archives' in json_data and  'gltf' in json_data['archives']:
-            if 'size' in json_data['archives']['gltf'] and json_data['archives']['gltf']['size']:
-                self.download_size = Utils.humanify_size(json_data['archives']['gltf']['size'])
-        else:
-            self.download_size = None
+        self.thumbnail_path = os.path.join(Config.ICOSA_THUMB_DIR, '{}.png'.format(self.asset_id))
 
-        self.thumbnail_url = os.path.join(Config.ICOSA_THUMB_DIR, '{}.png'.format(self.asset_id))
+        for f in json_data["formats"]:
+            if f["formatType"] == "GLTF2":
+                self.download_url = f["root"]["url"]
+                break
 
-        # Model info request
-        self.info_requested = False
-        self.license = None
+        # TODO: Get download size
+        self.download_size = None
+        # if 'archives' in json_data and  'gltf' in json_data['archives']:
+        #     if 'size' in json_data['archives']['gltf'] and json_data['archives']['gltf']['size']:
+        #         self.download_size = Utils.humanify_size(json_data['archives']['gltf']['size'])
+        # else:
+        #     self.download_size = None
 
-        # Download url data
-        self.download_url = None
+        self.info_requested = True  # We no longer need to request the model info
         self.time_url_requested = None
         self.url_expires = None
 
-def ShowMessage(icon = "INFO", title = "Info", message = "Information"):
-    pass
-    # def draw(self, context):
-    #     self.layout.label(text=message)
-    # print("\n{}: {}".format(icon, message))
-    # bpy.context.window_manager.popup_menu(draw, title = title, icon = icon)
+
+def ShowMessage(icon="INFO", title="Info", message="Information"):
+    def draw(self, context):
+        self.layout.label(text=message)
+    print("\n{}: {}".format(icon, message))
+    bpy.context.window_manager.popup_menu(draw, title = title, icon = icon)
 
 
 class IcosaDownloadModel(bpy.types.Operator):
