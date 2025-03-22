@@ -19,12 +19,12 @@ import urllib
 import urllib.parse
 import requests
 import threading
-import time
 from collections import OrderedDict
 import subprocess
 import tempfile
 import json
 import shutil
+from urllib.parse import urlparse
 from uuid import UUID
 
 import bpy
@@ -141,8 +141,8 @@ class Config:
     )
 
     ICOSA_SEARCH_DOMAIN = (
-        ('DEFAULT', "All site", "", 0),
-        ('OWN', "Own Models", "", 1)
+        ('DEFAULT', "Whole site", "", 0),
+        ('OWN', "Your Models", "", 1)
     )
 
     MAX_THUMBNAIL_HEIGHT = 256
@@ -357,7 +357,7 @@ def refresh_search(self, context):
 
 def set_login_status(status_type, status):
     login_props = get_icosa_login_props()
-    login_props.status = f"xxx: {status}"
+    login_props.status = f"{status}"
     login_props.status_type = status_type
 
 
@@ -368,10 +368,10 @@ def set_import_status(status):
 
 # Simple wrapper around requests.get for debugging purposes
 def requests_get(*args, **kwargs):
-    url = args[0]
-    print("______________________________")
-    print(url)
-    print("-----------------------------")
+    # url = args[0]
+    # print("______________________________")
+    # print(url)
+    # print("-----------------------------")
     return requests.get(*args, **kwargs)
 
 
@@ -473,9 +473,11 @@ class IcosaApi:
 
     def search(self, query, search_cb):
         skfb = get_icosa_props()
-        url = Config.BASE_SEARCH
+
         if skfb.search_domain == "OWN":
             url = Config.BASE_SEARCH_OWN_MODELS
+        else:
+            url = Config.BASE_SEARCH
 
         search_query = '{}{}'.format(url, query)
         if search_query not in ongoingSearches:
@@ -524,79 +526,84 @@ class IcosaApi:
 
     def download_model(self, asset_id):
         skfb_model = get_icosa_model(asset_id)
-        print("skfb_model: ", skfb_model)
         if skfb_model is not None:  # The model comes from the search results
-
-            if skfb_model.download_url:  # TODO handle expiration: and (time.time() - skfb_model.time_url_requested < skfb_model.url_expires):
-                self.get_archive(skfb_model.download_url, asset_id, skfb_model.title)
-            # TODO: Will download_url ever be empty now?
-            # else:
-            #     skfb_model.download_url = None
-            #     skfb_model.url_expires = None
-            #     skfb_model.time_url_requested = None
-            #     self.write_model_info(skfb_model.title, skfb_model.author, skfb_model.username, skfb_model.license, asset_id)
-            #     requests_get(Utils.build_download_url(asset_id), headers=self.headers, hooks={'response': self.handle_download})
+            if skfb_model.archive_url:  # TODO handle expiration: and (time.time() - skfb_model.time_url_requested < skfb_model.url_expires):
+                self.get_download(skfb_model.archive_url, [], asset_id, skfb_model.title)
+            elif skfb_model.download_url:
+                self.get_download(skfb_model.download_url, skfb_model.resource_urls, asset_id, skfb_model.title)
         else:  # Model comes from a direct link
             skfb = get_icosa_props()
             # TODO
-            download_url = Utils.build_download_url(asset_id)
-            requests_get('{}/{}'.format(Config.ICOSA_MODEL, asset_id), headers=skfb.skfb_api.headers, hooks={'response': self.parse_model_info_request})
-            requests_get(download_url, headers=self.headers, hooks={'response': self.handle_download})
 
-    def handle_download(self, r, *args, **kwargs):
-        if r.status_code != 200 or 'gltf' not in r.json():
-            ShowMessage("ERROR", "This model is not downloadable", "TODO: Add more information")
-            return
+    def get_download(self, main_url, additional_urls, asset_id, title):
 
-        skfb = get_icosa_props()
-        asset_id = Utils.get_asset_id_from_model_url(r.url)
-        if asset_id is None:
-            return
+        print(f"main_url: {main_url}")
 
-        gltf = r.json()['gltf']
-        skfb_model = get_icosa_model(asset_id)
+        main_filename = urlparse(main_url).path.split('/')[-1]
+        # If the main url is a zip file, we never need to download additional files
+        if main_filename.endswith('.zip'):
+            additional_urls = []
 
-        # If the model name is not known at this step, we could try to do an additional API call to get it
-        # This can happen when the user chose to import a model from its url
-        # However this adds an additional call,
-        # so for a simple hotfix models imported this way will be called "Icosa Gallery model"
-        self.get_archive(gltf['url'], asset_id, skfb_model.title if skfb_model else "Icosa Gallery Model")
-
-    def get_archive(self, url, asset_id, title):
-
-        if url is None:
+        if main_url is None:
             print('Url is None')
             return
 
-        r = requests_get(url, stream=True)
         temp_dir = os.path.join(Config.ICOSA_MODEL_DIR, asset_id)
         if not os.path.exists(temp_dir):
             os.makedirs(temp_dir)
 
-        archive_path = os.path.join(temp_dir, '{}.zip'.format(asset_id))
-        if not os.path.exists(archive_path):
-            wm = bpy.context.window_manager
-            wm.progress_begin(0, 100)
-            set_log("Downloading model..")
-            with open(archive_path, "wb") as f:
-                total_length = r.headers.get('content-length')
-                if total_length is None:  # no content length header
-                    f.write(r.content)
-                else:
-                    dl = 0
-                    total_length = int(total_length)
-                    for data in r.iter_content(chunk_size=4096):
-                        dl += len(data)
-                        f.write(data)
-                        done = int(100 * dl / total_length)
-                        wm.progress_update(done)
-                        set_log("Downloading model..{}%".format(done))
+        all_urls = [main_url] + additional_urls
 
-            wm.progress_end()
+        main_resource_path = None
+
+        print(f"all_urls: {all_urls}")
+        for url in all_urls:
+            resource_filename = urlparse(url).path.split('/')[-1]
+
+            resource_path = os.path.join(temp_dir, resource_filename)
+            if not main_resource_path:
+                main_resource_path = resource_path
+
+            if not os.path.exists(resource_path):  # Not downloaded yet
+
+                # wm = bpy.context.window_manager
+                # wm.progress_begin(0, 100)
+                # set_log("Downloading model..")
+
+                with open(resource_path, "wb") as f:
+                    req = requests_get(url, stream=True)
+                    f.write(req.content)
+
+                # TODO: Handle progress
+                #     total_length = req.headers.get('content-length')
+                #     if total_length is None:  # no content length header
+                #         f.write(req.content)
+                #     else:
+                #         dl = 0
+                #         total_length = int(total_length)
+                #         for data in req.iter_content(chunk_size=4096):
+                #             dl += len(data)
+                #             f.write(data)
+                #             done = int(100 * dl / total_length)
+                #             wm.progress_update(done)
+                #             set_log("Downloading model..{}%".format(done))
+                # wm.progress_end()
+
+            else:
+
+                print('Model already downloaded')
+
+        gltf_path = None
+        if main_filename.endswith('.zip'):
+            extract_path = unzip_archive(resource_path)
+            # Get the first gltf file in the extracted directory
+            # TODO Handle scenario where there are zero or multiple gltf files
+            gltf_path = os.path.glob(extract_path, '*.gltf')[0]
         else:
-            print('Model already downloaded')
+            gltf_path = main_resource_path
+        print(f"gltf_path: {gltf_path}")
+        print(f"main_resource_path: {main_resource_path}")
 
-        gltf_path, gltf_zip = unzip_archive(archive_path)
         if gltf_path:
             try:
                 import_model(gltf_path, asset_id, title)
@@ -694,49 +701,49 @@ def get_sorting_options(self, context):
 class IcosaBrowserPropsProxy(bpy.types.PropertyGroup):
     # Search
     query: StringProperty(
-            name="",
-            update=refresh_search,
-            description="Query to search",
-            default="",
-            options={'SKIP_SAVE'}
-            )
+        name="",
+        update=refresh_search,
+        description="Query to search",
+        default="",
+        options={'SKIP_SAVE'}
+    )
 
     categories: EnumProperty(
-            name="Categories",
-            items=Config.ICOSA_CATEGORIES,
-            description="Show only models of category",
-            default='ALL',
-            update=refresh_search
-            )
+        name="Categories",
+        items=Config.ICOSA_CATEGORIES,
+        description="Show only models of category",
+        default='ALL',
+        update=refresh_search
+    )
     face_count: EnumProperty(
-            name="Face Count",
-            items=Config.ICOSA_FACECOUNT,
-            description="Determines which meshes are exported",
-            default='ANY',
-            update=refresh_search
-            )
+        name="Face Count",
+        items=Config.ICOSA_FACECOUNT,
+        description="Determines which meshes are exported",
+        default='ANY',
+        update=refresh_search
+    )
 
     sort_by: EnumProperty(
-            name="Sort by",
-            items=get_sorting_options,
-            description="Sort ",
-            update=refresh_search,
-            )
+        name="Sort by",
+        items=get_sorting_options,
+        description="Sort ",
+        update=refresh_search,
+    )
 
     curated: BoolProperty(
-            name="Curated",
-            description="Show only curated models",
-            default=False,
-            update=refresh_search
-            )
+        name="Curated",
+        description="Show only curated models",
+        default=True,
+        update=refresh_search
+    )
 
     search_domain: EnumProperty(
-            name="",
-            items=get_available_search_domains,
-            description="Search domain ",
-            update=refresh_search,
-            default=None
-            )
+        name="",
+        items=get_available_search_domains,
+        description="Search domain ",
+        update=refresh_search,
+        default=None
+    )
 
     is_refreshing: BoolProperty(
         name="Refresh",
@@ -917,9 +924,7 @@ def unzip_archive(archive_path):
             print('Invaild zip. Try again')
             set_import_status('')
             return None, None
-
-        gltf_file = os.path.join(extract_dir, 'scene.gltf')
-        return gltf_file, archive_path
+        return extract_dir
 
     else:
         print('ERROR: archive doesn\'t exist')
@@ -943,31 +948,48 @@ def import_model(gltf_path, asset_id, title):
 
 
 def build_search_request(query, curated, face_count, category, sort_by):
-    final_query = '&q={}'.format(query) if query else ''
+
+    final_query = '&name={}'.format(query) if query else ''
 
     if curated:
         final_query = final_query + '&curated=true'
 
-    if sort_by == 'LIKES':
-        final_query = final_query + '&sort_by=-likeCount'
-    elif sort_by == 'RECENT':
-        final_query = final_query + '&sort_by=-publishedAt'
-    elif sort_by == 'VIEWS':
-        final_query = final_query + '&sort_by=-viewCount'
+    if sort_by == 'NEWEST':
+        final_query = final_query + '&orderBy=NEWEST'
+    elif sort_by == 'OLDEST':
+        final_query = final_query + '&orderBy=OLDEST'
+    elif sort_by == 'BEST':
+        final_query = final_query + '&orderBy=BEST'
+    elif sort_by == 'TRIANGLE_COUNT':
+        final_query = final_query + '&orderBy=TRIANGLE_COUNT'
+    elif sort_by == 'LIKED_TIME':
+        final_query = final_query + '&orderBy=LIKED_TIME'
+    elif sort_by == 'CREATE_TIME':
+        final_query = final_query + '&orderBy=CREATE_TIME'
+    elif sort_by == 'UPDATE_TIME':
+        final_query = final_query + '&orderBy=UPDATE_TIME'
+    elif sort_by == 'LIKES':
+        final_query = final_query + '&orderBy=LIKES'
+    elif sort_by == 'DOWNLOADS':
+        final_query = final_query + '&orderBy=DOWNLOADS'
+    elif sort_by == 'DISPLAY_NAME':
+        final_query = final_query + '&orderBy=DISPLAY_NAME'
+    elif sort_by == 'AUTHOR_NAME':
+        final_query = final_query + '&orderBy=AUTHOR_NAME'
 
     if face_count == '10K':
-        final_query = final_query + '&max_face_count=10000'
+        final_query = final_query + '&triangleCountMax=10000'
     elif face_count == '50K':
-        final_query = final_query + '&min_face_count=10000&max_face_count=50000'
+        final_query = final_query + '&triangleCountMin=10000&triangleCountMax=50000'
     elif face_count == '100K':
-        final_query = final_query + '&min_face_count=50000&max_face_count=100000'
+        final_query = final_query + '&triangleCountMin=50000&triangleCountMax=100000'
     elif face_count == '250K':
-        final_query = final_query + "&min_face_count=100000&max_face_count=250000"
+        final_query = final_query + "&triangleCountMin=100000&triangleCountMax=250000"
     elif face_count == '250KP':
-        final_query = final_query + "&min_face_count=250000"
+        final_query = final_query + "&triangleCountMin=250000"
 
     if category != 'ALL':
-        final_query = final_query + '&categories={}'.format(category)
+        final_query = final_query + '&category={}'.format(category)
 
     return final_query
 
@@ -1162,8 +1184,7 @@ class LoginModal(bpy.types.Operator):
 
             if login_props.use_device_code:
                 url = f"{Config.ICOSA_DEVICE_AUTH}?device_code={login_props.device_code}"
-                print(url)
-                requests_get(url, hooks={'response': self.handle_device_login})
+                requests.post(url, hooks={'response': self.handle_device_login})
 
             else:
                 self.handle_token_login(login_props.api_token)
@@ -1189,10 +1210,28 @@ class ImportModalOperator(bpy.types.Operator):
         return {'FINISHED'}
 
     def modal(self, context, event):
-        if bpy.context.scene.render.engine not in ["CYCLES", "BLENDER_EEVEE"]:
-            bpy.context.scene.render.engine = "BLENDER_EEVEE"
+        if bpy.context.scene.render.engine not in ["CYCLES", "BLENDER_EEVEE_NEXT"]:
+            bpy.context.scene.render.engine = "BLENDER_EEVEE_NEXT"
         try:
-            old_objects = [o.name for o in bpy.data.objects] # Get the current objects inorder to find the new node hierarchy
+            old_objects = [o.name for o in bpy.data.objects]  # Get the current objects in order to find the new node hierarchy
+
+            # Blender doesn't support uv channels with 3 or 4 components
+            # Legacy Tilt files from Poly are using 3 or 4 components for uv channels
+            # If we prepend "_" to those channels, Blender will treat them as custom channels
+            with open(self.gltf_path, 'r') as f:
+                gltf_json = json.load(f)
+            if "GOOGLE_tilt_brush_techniques" in gltf_json["extensions"]:
+                for mesh in gltf_json["meshes"]:
+                    for primitive in mesh["primitives"]:
+                        # Rename the key "TEX_COORD_0" to "_TEXCOORD_0"
+                        if "TEXCOORD_0" in primitive["attributes"]:
+                            primitive["attributes"]["_TEXCOORD_0"] = primitive["attributes"].pop("TEXCOORD_0")
+                        if "TEXCOORD_0" in primitive["attributes"]:
+                            primitive["attributes"]["_TEXCOORD_1"] = primitive["attributes"].pop("TEXCOORD_0")
+
+                with open(self.gltf_path, 'w') as f:
+                    json.dump(gltf_json, f, indent=4)
+
             bpy.ops.import_scene.gltf(filepath=self.gltf_path)
             set_import_status('')
             Utils.clean_downloaded_model_dir(self.asset_id)
@@ -1521,13 +1560,21 @@ class IcosaModel:
         self.asset_id = json_data['assetId']
         self.face_count = json_data['triangleCount']
         self.license = json_data['license']
-
+        self.download_url = None
+        self.archive_url = None
+        self.resource_urls = []
         self.thumbnail_path = os.path.join(Config.ICOSA_THUMB_DIR, '{}.png'.format(self.asset_id))
 
         for f in json_data["formats"]:
-            if f["formatType"] == "GLTF2":
+            # TODO Allow selecting the format by role or "preferred" type
+            # TODO Use archive_url when we add it to the API
+            if f["formatType"] == "GLB" or f["formatType"] == "GLTF2":
+                if "archive_url" in f:
+                    self.archive_url = f["archive_url"]
                 self.download_url = f["root"]["url"]
-                break
+                if "resources" in f:
+                    for resource in f["resources"]:
+                        self.resource_urls.append(resource["url"])
 
         # TODO: Get download size
         self.download_size = None
