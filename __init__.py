@@ -80,6 +80,7 @@ class Config:
 
     ICOSA_ME = f'{ICOSA_API}/users/me'
     BASE_SEARCH_OWN_MODELS = f'{ICOSA_ME}/assets?'
+    BASE_SEARCH_LIKED_MODELS = f'{ICOSA_ME}/likedassets?'
 
     ICOSA_SEARCH = f'{ICOSA_API}/assets?'
     BASE_SEARCH = f'{ICOSA_SEARCH}'
@@ -127,22 +128,22 @@ class Config:
     )
 
     ICOSA_SORT_BY = (
+        ('BEST', "Best", ""),
         ('NEWEST', "Newest", ""),
         ('OLDEST', "Oldest", ""),
-        ('BEST', "Best", ""),
         ('TRIANGLE_COUNT', "Triangle Count", ""),
         ('LIKED_TIME', "Recently Liked", ""),
-        ('CREATE_TIME', "Creation Time", ""),
-        ('UPDATE_TIME', "Updated     Time", ""),
-        ('LIKES', "Likes", ""),
-        ('DOWNLOADS', "Downloads", ""),
+        ('UPDATE_TIME', "Recently Updated", ""),
+        ('LIKES', "Most Likes", ""),
+        ('DOWNLOADS', "Most Downloads", ""),
         ('DISPLAY_NAME', "Title", ""),
         ('AUTHOR_NAME', "Author", "")
     )
 
     ICOSA_SEARCH_DOMAIN = (
         ('DEFAULT', "Whole site", "", 0),
-        ('OWN', "Your Models", "", 1)
+        ('OWN', "Your Models", "", 1),
+        ('LIKED', "Your Likes", "", 2)
     )
 
     MAX_THUMBNAIL_HEIGHT = 256
@@ -342,6 +343,7 @@ def refresh_search(self, context):
 
     if pprops.search_domain != props.search_domain:
         props.search_domain = pprops.search_domain
+        # get_sorting_options(context)
     if pprops.sort_by != props.sort_by:
         props.sort_by = pprops.sort_by
 
@@ -476,6 +478,8 @@ class IcosaApi:
 
         if skfb.search_domain == "OWN":
             url = Config.BASE_SEARCH_OWN_MODELS
+        elif skfb.search_domain == "LIKED":
+            url = Config.BASE_SEARCH_LIKED_MODELS
         else:
             url = Config.BASE_SEARCH
 
@@ -691,12 +695,15 @@ class IcosaLoginProps(bpy.types.PropertyGroup):
     skfb_api = IcosaApi()
 
 def get_available_search_domains(self, context):
-    api = get_icosa_props().skfb_api
     search_domains = [domain for domain in Config.ICOSA_SEARCH_DOMAIN]
     return tuple(search_domains)
 
 def get_sorting_options(self, context):
-    return Config.ICOSA_SORT_BY
+    props = get_icosa_props()
+    sort_options = Config.ICOSA_SORT_BY
+    if props.search_domain != "LIKED":
+        sort_options = [option for option in sort_options if option[0] != 'LIKED_TIME']
+    return sort_options
 
 class IcosaBrowserPropsProxy(bpy.types.PropertyGroup):
     # Search
@@ -741,8 +748,7 @@ class IcosaBrowserPropsProxy(bpy.types.PropertyGroup):
         name="",
         items=get_available_search_domains,
         description="Search domain ",
-        update=refresh_search,
-        default=None
+        update=refresh_search
     )
 
     is_refreshing: BoolProperty(
@@ -755,42 +761,42 @@ class IcosaBrowserPropsProxy(bpy.types.PropertyGroup):
 class IcosaBrowserProps(bpy.types.PropertyGroup):
     # Search
     query: StringProperty(
-            name="Search",
-            description="Query to search",
-            default=""
-            )
+        name="Search",
+        description="Query to search",
+        default=""
+    )
 
     categories: EnumProperty(
-            name="Categories",
-            items=Config.ICOSA_CATEGORIES,
-            description="Show only models of category",
-            default='ALL',
-             )
+        name="Categories",
+        items=Config.ICOSA_CATEGORIES,
+        description="Show only models of category",
+        default='ALL',
+    )
 
     face_count: EnumProperty(
-            name="Face Count",
-            items=Config.ICOSA_FACECOUNT,
-            description="Determines which meshes are exported",
-            default='ANY',
-            )
+        name="Face Count",
+        items=Config.ICOSA_FACECOUNT,
+        description="Determines which meshes are exported",
+        default='ANY',
+    )
 
     sort_by: EnumProperty(
-            name="Sort by",
-            items=get_sorting_options,
-            description="Sort ",
-            )
+        name="Sort by",
+        items=get_sorting_options,
+        description="Sort ",
+    )
 
     curated: BoolProperty(
-            name="Curated",
-            description="Show only curated models",
-            default=False,
-            )
+        name="Curated",
+        description="Show only curated models",
+        default=True,
+    )
 
     search_domain: EnumProperty(
-            name="Search domain",
-            items=get_available_search_domains,
-            description="Search domain ",
-            )
+        name="Search domain",
+        items=get_available_search_domains,
+        description="Search domain ",
+    )
 
     status: StringProperty(name='status', default='idle')
 
@@ -1034,7 +1040,7 @@ def parse_results(r, *args, **kwargs):
             requests_get(Utils.build_download_url(assetId), headers=api.headers, hooks={'response': set_download_size})
         """
 
-    if json_data['nextPageToken']:
+    if 'nextPageToken' in json_data and json_data['nextPageToken']:
         current_url = r.url
         # Parse the URL and remove the page_token parameter
         parsed_url = urllib.parse.urlparse(current_url)
@@ -1392,17 +1398,12 @@ class IcosaBrowse(View3DPanel, bpy.types.Panel):
             row.prop(props, "expanded_filters", icon="TRIA_DOWN" if props.expanded_filters else "TRIA_RIGHT", icon_only=True, emboss=False)
             row.label(text="Search filters")
             if props.expanded_filters:
-                if props.search_domain in ["DEFAULT", "OWN"]:
-                    col.separator()
-                    col.prop(props, "categories")
-                    col.prop(props, "sort_by")
-                    col.prop(props, "face_count")
-                    row = col.row()
-                    row.prop(props, "curated")
-                else:
-                    col.separator()
-                    col.prop(props, "sort_by")
-                    col.prop(props, "face_count")
+                col.separator()
+                col.prop(props, "categories")
+                col.prop(props, "sort_by")
+                col.prop(props, "face_count")
+                row = col.row()
+                row.prop(props, "curated")
 
         pprops = get_icosa_props()
 
