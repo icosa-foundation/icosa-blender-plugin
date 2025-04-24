@@ -18,25 +18,45 @@ import os
 import bpy
 import json
 import sys
+import zipfile
 
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
-SKETCHFAB_EXPORT_TEMP_DIR = sys.argv[7]
-SKETCHFAB_EXPORT_DATA_FILE = os.path.join(SKETCHFAB_EXPORT_TEMP_DIR, "export-sketchfab.json")
+ICOSA_EXPORT_TEMP_DIR = sys.argv[7]
+ICOSA_EXPORT_DATA_FILE = os.path.join(ICOSA_EXPORT_TEMP_DIR, "export-icosa.json")
 
 # save a copy of the current blendfile
-def save_blend_copy():
+def save_glb(export_settings):
     import time
 
-    filepath = SKETCHFAB_EXPORT_TEMP_DIR
-    filename = time.strftime("Sketchfab_%Y_%m_%d_%H_%M_%S.blend",
+    filepath = ICOSA_EXPORT_TEMP_DIR
+    filename = time.strftime("Icosa_%Y_%m_%d_%H_%M_%S.glb",
                              time.localtime(time.time()))
     filepath = os.path.join(filepath, filename)
-    bpy.ops.wm.save_as_mainfile(filepath=filepath,
-                                compress=True,
-                                copy=True)
-    size = os.path.getsize(filepath)
-    return (filepath, filename, size)
+    
+    # Export as GLB
+    bpy.ops.export_scene.gltf(
+        filepath=filepath,
+        export_format='GLB',
+        export_cameras=True,
+        export_lights=True,
+        use_selection=bool(export_settings['selection']),
+        export_materials='EXPORT',
+        export_extras=True,
+        export_apply=True  # Apply modifiers
+    )
+
+    # Zip the GLB file
+    zip_filepath = filepath + ".zip"
+    with zipfile.ZipFile(zip_filepath, 'w', zipfile.ZIP_DEFLATED) as zipf:
+        zipf.write(filepath, filename)
+    zip_filename = os.path.basename(zip_filepath)
+    print("----------------------------------")
+    print("Packed file: ", zip_filepath)
+    print("----------------------------------")
+    size = os.path.getsize(zip_filepath)
+
+    return (zip_filepath, zip_filename, size)
 
 # change visibility statuses and pack images
 def prepare_assets(export_settings):
@@ -102,14 +122,14 @@ def prepare_assets(export_settings):
 
 def prepare_file(export_settings):
     prepare_assets(export_settings)
-    return save_blend_copy()
+    return save_glb(export_settings)
 
 def read_settings():
-    with open(SKETCHFAB_EXPORT_DATA_FILE, 'r') as s:
+    with open(ICOSA_EXPORT_DATA_FILE, 'r') as s:
         return json.load(s)
 
 def write_result(filepath, filename, size):
-    with open(SKETCHFAB_EXPORT_DATA_FILE, 'w') as s:
+    with open(ICOSA_EXPORT_DATA_FILE, 'w') as s:
         json.dump({
                 'filepath': filepath,
                 'filename': filename,

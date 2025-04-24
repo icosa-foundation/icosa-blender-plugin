@@ -76,6 +76,7 @@ class Config:
     ICOSA_API = 'https://api.icosa.gallery/v1'
 
     ICOSA_MODEL = f'{ICOSA_API}/assets'
+    ICOSA_UPLOAD = f'{ICOSA_API}/assets'
     ICOSA_DEVICE_AUTH = f'{ICOSA_API}/login/device_login'
 
     ICOSA_ME = f'{ICOSA_API}/users/me'
@@ -84,7 +85,7 @@ class Config:
 
     ICOSA_SEARCH = f'{ICOSA_API}/assets?'
     BASE_SEARCH = f'{ICOSA_SEARCH}'
-    DEFAULT_FLAGS = f'orderBy=BEST&license=CREATIVE_COMMONS_BY&format=GLTF2'
+    DEFAULT_FLAGS = f'orderBy=BEST&license=REMIXABLE&format=-TILT'
     DEFAULT_SEARCH = f'{BASE_SEARCH}{DEFAULT_FLAGS}'
 
     # PURCHASED_MODELS = ICOSA_ME + "/models/purchases?type=models"
@@ -352,6 +353,7 @@ def refresh_search(self, context):
 
     props.query = pprops.query
     props.curated = pprops.curated
+    props.include_tiltbrush = pprops.include_tiltbrush
     props.categories = pprops.categories
     props.face_count = pprops.face_count
     bpy.ops.wm.icosa_search('EXEC_DEFAULT')
@@ -744,6 +746,13 @@ class IcosaBrowserPropsProxy(bpy.types.PropertyGroup):
         update=refresh_search
     )
 
+    include_tiltbrush: BoolProperty(
+        name="Open Brush Sketches",
+        description="Include sketches from Open Brush (or Tilt Brush)",
+        default=False,
+        update=refresh_search
+    )
+
     search_domain: EnumProperty(
         name="",
         items=get_available_search_domains,
@@ -790,6 +799,12 @@ class IcosaBrowserProps(bpy.types.PropertyGroup):
         name="Curated",
         description="Show only curated models",
         default=True,
+    )
+
+    include_tiltbrush: BoolProperty(
+        name="Open Brush Sketches",
+        description="Include sketches from Open Brush (or Tilt Brush)",
+        default=False,
     )
 
     search_domain: EnumProperty(
@@ -953,12 +968,15 @@ def import_model(gltf_path, asset_id, title):
     bpy.ops.wm.import_modal('INVOKE_DEFAULT', gltf_path=gltf_path, asset_id=asset_id, title=title)
 
 
-def build_search_request(query, curated, face_count, category, sort_by):
+def build_search_request(query, curated, include_tiltbrush, face_count, category, sort_by):
 
     final_query = '&name={}'.format(query) if query else ''
 
     if curated:
         final_query = final_query + '&curated=true'
+
+    if not include_tiltbrush:
+        final_query = final_query + '&format=-TILT'
 
     if sort_by == 'NEWEST':
         final_query = final_query + '&orderBy=NEWEST'
@@ -1404,6 +1422,7 @@ class IcosaBrowse(View3DPanel, bpy.types.Panel):
                 col.prop(props, "face_count")
                 row = col.row()
                 row.prop(props, "curated")
+                row.prop(props, "include_tiltbrush")
 
         pprops = get_icosa_props()
 
@@ -1497,24 +1516,10 @@ class IcosaExportPanel(View3DPanel, bpy.types.Panel):
         # Selection only
         layout.prop(props, "selection")
 
-        # Model properties
-        col = layout.box().column(align=True)
-        if not props.reuploadBoolean:
-            col.prop(props, "title")
-            col.prop(props, "description")
-            col.prop(props, "tags")
-            col.prop(props, "draft")
-            col.prop(props, "private")
-            if props.private:
-                col.prop(props, "password")
-        col.prop(props, "reuploadBoolean")
-        if props.reuploadBoolean:
-            col.prop(props, "reuploadPath")
-
         # Upload button
         row = layout.row()
         row.scale_y = 2.0
-        upload_label = "Reupload" if props.reuploadBoolean else "Upload"
+        upload_label = "Upload"
         upload_icon  = "EXPORT"
         upload_enabled = api.is_user_logged() and bpy.context.mode == 'OBJECT'
         if not upload_enabled:
@@ -1527,9 +1532,9 @@ class IcosaExportPanel(View3DPanel, bpy.types.Panel):
             upload_icon  = "SORTTIME"
         row.operator("wm.icosa_export", icon=upload_icon, text=upload_label)
 
-        model_url = sf_state.model_url
-        if model_url:
-            layout.operator("wm.url_open", text="View Online Model", icon='URL').url = model_url
+        publish_url = sf_state.publish_url
+        if publish_url:
+            layout.operator("wm.url_open", text="Edit or Publish", icon='URL').url = publish_url
 
 
 class IcosaLogger(bpy.types.Operator):
@@ -1647,7 +1652,7 @@ class IcosaSearch(bpy.types.Operator):
         skfb = get_icosa_props()
         skfb.skfb_api.prev_results_url = None
         skfb.skfb_api.next_results_url = None
-        final_query = build_search_request(skfb.query, skfb.curated, skfb.face_count, skfb.categories, skfb.sort_by)
+        final_query = build_search_request(skfb.query, skfb.curated, skfb.include_tiltbrush, skfb.face_count, skfb.categories, skfb.sort_by)
         skfb.skfb_api.search(final_query, parse_results)
         return {'FINISHED'}
 
@@ -1789,11 +1794,6 @@ class IcosaEnable(bpy.types.Operator):
 
 
 class IcosaExportProps(bpy.types.PropertyGroup):
-    description: StringProperty(
-            name="Description",
-            description="Description of the model (optional)",
-            default="",
-            maxlen=1024)
     filepath: StringProperty(
             name="Filepath",
             description="internal use",
@@ -1804,42 +1804,6 @@ class IcosaExportProps(bpy.types.PropertyGroup):
             description="Determines which meshes are exported",
             default=False,
             )
-    private: BoolProperty(
-            name="Private",
-            description="Upload as private (requires a pro account)",
-            default=False,
-            )
-    draft: BoolProperty(
-            name="Draft",
-            description="Do not publish the model",
-            default=True,
-            )
-    password: StringProperty(
-            name="Password",
-            description="Password-protect your model (requires a pro account)",
-            default="",
-            )
-    tags: StringProperty(
-            name="Tags",
-            description="List of tags (42 max), separated by spaces (optional)",
-            default="",
-            )
-    title: StringProperty(
-            name="Title",
-            description="Title of the model (determined automatically if left empty)",
-            default="",
-            maxlen=48
-            )
-    reuploadBoolean: BoolProperty(
-            name="Reupload",
-            description="Reupload the model over an existing one",
-            default=False,
-            )
-    reuploadPath: StringProperty(
-            name="Url",
-            description="Paste full model url to reupload to",
-            default="",
-            maxlen=1024)
 
 
 class _IcosaState:
@@ -1848,6 +1812,7 @@ class _IcosaState:
         "uploading",
         "size_label",
         "model_url",
+        "publish_url",
         "report_message",
         "report_type",
         )
@@ -1856,6 +1821,7 @@ class _IcosaState:
         self.uploading = False
         self.size_label = ""
         self.model_url = ""
+        self.publish_url = ""
         self.report_message = ""
         self.report_type = ''
 
@@ -1872,77 +1838,31 @@ def upload_report(report_message, report_type):
     sf_state.report_message = report_message
     sf_state.report_type = report_type
 
-# upload the blend-file to Icosa
-def upload(filepath, filename):
 
+def upload_as_multipart(filepath, filename):
+    """Upload file using multipart form encoding instead of JSON"""
     props = get_icosa_props()
-    api   = props.skfb_api
+    api = props.skfb_api
 
-    wm = bpy.context.window_manager
-    props = wm.icosa_export
-
-    title = props.title
-    if not title:
-        title = os.path.splitext(os.path.basename(bpy.data.filepath))[0]
-
-    # Limit the number of tags to 42
-    props.tags = " ".join(props.tags.split(" ")[:42])
-
-    _data = {
-        "name": title,
-        "description": props.description,
-        "tags": props.tags,
-        "private": props.private,
-        "isPublished": not props.draft,
-        "password": props.password,
-        "source": "blender-exporter",
+    # Create form data
+    form = {
+        "files": (filename, open(filepath, 'rb'), 'application/zip')
     }
 
-    _files = {
-        "modelFile": open(filepath, 'rb'),
-    }
+    _headers = api.headers.copy()
+    # Don't set Content-Type as requests will set it automatically with the boundary
 
-    _headers = api.headers
-
-    uploadUrl = ""
-    modelUid  = ""
+    modelUid = ""
     requestFunction = requests.post
-
-    # Are we reuploading ?
-    if props.reuploadBoolean:
-
-        requestFunction = requests.put
-
-        if "icosa.gallery/" not in props.reuploadPath:
-            return upload_report("reupload url is malformed %s" % props.reuploadPath, 'ERROR')
-
-        # Get the model assetId
-        try:
-            modelUid = props.reuploadPath[-32:]
-            if not Utils.is_valid_uid(modelUid):
-                return upload_report("reupload url does not end with a valid assetId (32 characters string): %s" % props.reuploadPath, 'ERROR')
-        except:
-            return upload_report("reupload url is malformed %s" % props.reuploadPath, 'ERROR')
-
-        uploadUrl = '{}/{}'.format(Config.ICOSA_MODEL, modelUid)
-
-        _data = {
-            "assetId": modelUid,
-            "source": "blender-exporter"
-        }
-
-    else:
-
-        uploadUrl = Config.ICOSA_MODEL
+    uploadUrl = Config.ICOSA_UPLOAD
 
     # Upload and parse the result
     try:
         print("Uploading to %s" % uploadUrl)
         r = requestFunction(
             uploadUrl,
-            data    = _data,
-            files   = _files,
-            headers = _headers
+            files=form,
+            headers=_headers
         )
     except requests.exceptions.RequestException as e:
         return upload_report("Upload failed. Error: %s" % str(e), 'WARNING')
@@ -1953,8 +1873,11 @@ def upload(filepath, filename):
         try:
             result = r.json()
             sf_state.model_url = Config.ICOSA_URL + "/view/" + result["assetId"]
+            sf_state.publish_url = result['publishUrl']
         except:
             sf_state.model_url = Config.ICOSA_URL + "/view/" + modelUid
+            sf_state.publish_url = ""
+
         return upload_report("Upload complete. Available on your icosa.gallery dashboard.", 'INFO')
 
 
@@ -2056,7 +1979,7 @@ class ExportIcosa(bpy.types.Operator):
         sf_state.uploading = True
         sf_state.size_label = Utils.humanify_size(size)
         self._thread = threading.Thread(
-                target=upload,
+                target=upload_as_multipart,
                 args=(props.filepath, filename),
                 )
         self._thread.start()
