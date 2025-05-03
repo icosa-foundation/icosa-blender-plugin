@@ -1,5 +1,5 @@
 """
-Copyright 2021 Sketchfab
+Copyright 2025 Sketchfab / Icosa Foundation
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -13,6 +13,8 @@ WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 See the License for the specific language governing permissions and
 limitations under the License.
 """
+
+# Based on the original Sketchfab exporter for Blender by Sketchfab
 
 import os
 import bpy
@@ -41,9 +43,10 @@ def save_glb(export_settings):
         export_cameras=True,
         export_lights=True,
         use_selection=bool(export_settings['selection']),
+        use_visible=True,
         export_materials='EXPORT',
         export_extras=True,
-        export_apply=True  # Apply modifiers
+        export_apply=True
     )
 
     # Zip the GLB file
