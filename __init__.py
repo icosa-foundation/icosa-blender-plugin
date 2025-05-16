@@ -16,19 +16,19 @@ limitations under the License.
 
 This file has been modified from its original version.
 """
-import functools
-import os
-import urllib
-import urllib.parse
-import requests
-import threading
 from collections import OrderedDict
+import functools
+import json
+import os
+import shutil
 import subprocess
 import tempfile
-import json
-import shutil
-from urllib.parse import urlparse
+import threading
+import urllib
+import urllib.parse
 from uuid import UUID
+
+import requests
 
 import bpy
 import bpy.utils.previews
@@ -548,7 +548,7 @@ class IcosaApi:
 
         print(f"main_url: {main_url}")
 
-        main_filename = urlparse(main_url).path.split('/')[-1]
+        main_filename = urllib.parse.urlparse(main_url).path.split('/')[-1]
         # If the main url is a zip file, we never need to download additional files
         if main_filename.endswith('.zip'):
             additional_urls = []
@@ -567,7 +567,7 @@ class IcosaApi:
 
         print(f"all_urls: {all_urls}")
         for url in all_urls:
-            resource_filename = urlparse(url).path.split('/')[-1]
+            resource_filename = urllib.parse.urlparse(url).path.split('/')[-1]
 
             resource_path = os.path.join(temp_dir, resource_filename)
             if not main_resource_path:
