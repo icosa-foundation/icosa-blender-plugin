@@ -18,6 +18,7 @@ This file has been modified from its original version.
 """
 from collections import OrderedDict
 import functools
+import glob
 import json
 import os
 import shutil
@@ -536,8 +537,8 @@ class IcosaApi:
     def download_model(self, asset_id):
         icosa_model = get_icosa_model(asset_id)
         if icosa_model is not None:  # The model comes from the search results
-            if icosa_model.archive_url:  # TODO handle expiration: and (time.time() - icosa_model.time_url_requested < icosa_model.url_expires):
-                self.get_download(icosa_model.archive_url, [], asset_id, icosa_model.title)
+            if icosa_model.zip_archive_url:  # TODO handle expiration: and (time.time() - icosa_model.time_url_requested < icosa_model.url_expires):
+                self.get_download(icosa_model.zip_archive_url, [], asset_id, icosa_model.title)
             elif icosa_model.download_url:
                 self.get_download(icosa_model.download_url, icosa_model.resource_urls, asset_id, icosa_model.title)
         else:  # Model comes from a direct link
@@ -607,7 +608,9 @@ class IcosaApi:
             extract_path = unzip_archive(resource_path)
             # Get the first gltf file in the extracted directory
             # TODO Handle scenario where there are zero or multiple gltf files
-            gltf_path = os.path.glob(extract_path, '*.gltf')[0]
+            gltf_files = glob.glob(os.path.join(extract_path, '*.gltf'))
+            if gltf_files:
+                gltf_path = gltf_files[0]
         else:
             gltf_path = main_resource_path
         print(f"gltf_path: {gltf_path}")
@@ -1570,16 +1573,19 @@ class IcosaModel:
         self.face_count = json_data['triangleCount']
         self.license = json_data['license']
         self.download_url = None
-        self.archive_url = None
+        self.zip_archive_url = None
         self.resource_urls = []
         self.thumbnail_path = os.path.join(Config.ICOSA_THUMB_DIR, '{}.png'.format(self.asset_id))
 
         for f in json_data["formats"]:
             # TODO Allow selecting the format by role or "preferred" type
-            # TODO Use archive_url when we add it to the API
             if f["formatType"] == "GLB" or f["formatType"] == "GLTF2":
-                if "archive_url" in f:
-                    self.archive_url = f["archive_url"]
+                print(f"Found GLTF/GLB with role: {f['role']}")
+                if "zip_archive_url" in f:
+                    # TODO Remove this kludge after https://github.com/icosa-foundation/icosa-gallery/issues/164 is resolved
+                    if f["zip_archive_url"].startswith("https://poly.googleusercontent.com"):
+                        f["zip_archive_url"] = "https://web.archive.org/web/" + f["zip_archive_url"]
+                    self.zip_archive_url = f["zip_archive_url"]
                 self.download_url = f["root"]["url"]
                 if "resources" in f:
                     for resource in f["resources"]:
