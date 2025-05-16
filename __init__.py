@@ -39,13 +39,13 @@ from bpy.props import (StringProperty,
                        PointerProperty)
 
 bl_info = {
-    'name': 'Icosa Gallery Plugin',
-    'description': 'Browse and download models from the Icosa Gallery',
+    'name': 'Icosa Gallery Addon',
+    'description': 'Browse, download from and publish to the Icosa 3D models Gallery',
     'author': 'Icosa Foundation',
-    'license': 'APACHE2',
+    'license': 'SPDX:GPL-3.0-or-later',
     'deps': '',
-    'version': (1, 6, 1),
-    "blender": (2, 80, 0),
+    'version': (0, 0, 1),
+    "blender": (4, 2, 0),
     'location': 'View3D > Tools > Icosa Gallery',
     'warning': '',
     'wiki_url': 'https://github.com/icosa-foundation/icosa-blender-plugin/releases',
