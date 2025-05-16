@@ -321,9 +321,9 @@ def get_icosa_props_proxy():
 
 
 def get_icosa_model(asset_id):
-    skfb = get_icosa_props()
-    if "current" in skfb.search_results and asset_id in skfb.search_results["current"]:
-        return skfb.search_results['current'][asset_id]
+    icosa_props = get_icosa_props()
+    if "current" in icosa_props.search_results and asset_id in icosa_props.search_results["current"]:
+        return icosa_props.search_results['current'][asset_id]
     else:
         return None
 
@@ -467,23 +467,23 @@ class IcosaApi:
         model_infothr.start()
 
     def handle_model_info(self, r, asset_id, *args, **kwargs):
-        skfb = get_icosa_props()
+        icosa_props = get_icosa_props()
 
         # Dirty fix to avoid processing obsolete result data
-        if 'current' not in skfb.search_results or asset_id is None or asset_id not in skfb.search_results['current']:
+        if 'current' not in icosa_props.search_results or asset_id is None or asset_id not in icosa_props.search_results['current']:
             return
 
-        model = skfb.search_results['current'][asset_id]
+        model = icosa_props.search_results['current'][asset_id]
         json_data = r.json()
         model.license = json_data.get('license', {})
-        skfb.search_results['current'][asset_id] = model
+        icosa_props.search_results['current'][asset_id] = model
 
     def search(self, query, search_cb):
-        skfb = get_icosa_props()
+        icosa_props = get_icosa_props()
 
-        if skfb.search_domain == "OWN":
+        if icosa_props.search_domain == "OWN":
             url = Config.BASE_SEARCH_OWN_MODELS
-        elif skfb.search_domain == "LIKED":
+        elif icosa_props.search_domain == "LIKED":
             url = Config.BASE_SEARCH_LIKED_MODELS
         else:
             url = Config.BASE_SEARCH
@@ -534,14 +534,14 @@ class IcosaApi:
             print("Error encountered while parsing model info request: {}".format(r.url))
 
     def download_model(self, asset_id):
-        skfb_model = get_icosa_model(asset_id)
-        if skfb_model is not None:  # The model comes from the search results
-            if skfb_model.archive_url:  # TODO handle expiration: and (time.time() - skfb_model.time_url_requested < skfb_model.url_expires):
-                self.get_download(skfb_model.archive_url, [], asset_id, skfb_model.title)
-            elif skfb_model.download_url:
-                self.get_download(skfb_model.download_url, skfb_model.resource_urls, asset_id, skfb_model.title)
+        icosa_model = get_icosa_model(asset_id)
+        if icosa_model is not None:  # The model comes from the search results
+            if icosa_model.archive_url:  # TODO handle expiration: and (time.time() - icosa_model.time_url_requested < icosa_model.url_expires):
+                self.get_download(icosa_model.archive_url, [], asset_id, icosa_model.title)
+            elif icosa_model.download_url:
+                self.get_download(icosa_model.download_url, icosa_model.resource_urls, asset_id, icosa_model.title)
         else:  # Model comes from a direct link
-            skfb = get_icosa_props()
+            icosa_props = get_icosa_props()
             # TODO
 
     def get_download(self, main_url, additional_urls, asset_id, title):
@@ -697,7 +697,7 @@ class IcosaLoginProps(bpy.types.PropertyGroup):
     last_username: StringProperty(default="default")
     last_password: StringProperty(default="default")
 
-    skfb_api = IcosaApi()
+    icosa_api = IcosaApi()
 
 def get_available_search_domains(self, context):
     search_domains = [domain for domain in Config.ICOSA_SEARCH_DOMAIN]
@@ -829,7 +829,7 @@ class IcosaBrowserProps(bpy.types.PropertyGroup):
     has_searched_next: BoolProperty(name='next', default=False)
     has_searched_prev: BoolProperty(name='prev', default=False)
 
-    skfb_api = IcosaLoginProps.skfb_api
+    icosa_api = IcosaLoginProps.icosa_api
     custom_icons = bpy.utils.previews.new()
     has_loaded_thumbnails: BoolProperty(default=False)
 
@@ -851,36 +851,36 @@ class IcosaBrowserProps(bpy.types.PropertyGroup):
 
 
 def list_current_results(self, context):
-    skfb = get_icosa_props()
+    icosa_props = get_icosa_props()
 
     # No results:
-    if 'current' not in skfb.search_results:
+    if 'current' not in icosa_props.search_results:
         return preview_collection['default']
 
-    if skfb.has_loaded_thumbnails and 'thumbnails' in preview_collection:
+    if icosa_props.has_loaded_thumbnails and 'thumbnails' in preview_collection:
         return preview_collection['thumbnails']
 
     res = []
     missing_thumbnail = False
-    if 'current' in skfb.search_results and len(skfb.search_results['current']):
-        skfb_results = skfb.search_results['current']
-        for i, result in enumerate(skfb_results):
-            if result in skfb_results:
-                model = skfb_results[result]
-                if model.asset_id in skfb.custom_icons:
-                    res.append((model.asset_id, model.title, "", skfb.custom_icons[model.asset_id].icon_id, i))
+    if 'current' in icosa_props.search_results and len(icosa_props.search_results['current']):
+        icosa_results = icosa_props.search_results['current']
+        for i, result in enumerate(icosa_results):
+            if result in icosa_results:
+                model = icosa_results[result]
+                if model.asset_id in icosa_props.custom_icons:
+                    res.append((model.asset_id, model.title, "", icosa_props.custom_icons[model.asset_id].icon_id, i))
                 else:
-                    res.append((model.asset_id, model.title, "", preview_collection['skfb']['0'].icon_id, i))
+                    res.append((model.asset_id, model.title, "", preview_collection['icosa_icon']['0'].icon_id, i))
                     missing_thumbnail = True
             else:
                 print('Result issue')
 
     # Default element to avoid having an empty preview collection
     if not res:
-        res.append(('NORESULTS', 'empty', "", preview_collection['skfb']['0'].icon_id, 0))
+        res.append(('NORESULTS', 'empty', "", preview_collection['icosa_icon']['0'].icon_id, 0))
 
     preview_collection['thumbnails'] = tuple(res)
-    skfb.has_loaded_thumbnails = not missing_thumbnail
+    icosa_props.has_loaded_thumbnails = not missing_thumbnail
     return preview_collection['thumbnails']
 
 
@@ -910,10 +910,10 @@ def draw_model_info(layout, model, context):
 def draw_import_button(layout, model, context):
 
     import_ops = layout.row()
-    skfb = get_icosa_props()
+    icosa_props = get_icosa_props()
 
-    import_ops.enabled = skfb.skfb_api.is_user_logged() and bpy.context.mode == 'OBJECT'
-    if not skfb.skfb_api.is_user_logged():
+    import_ops.enabled = icosa_props.icosa_api.is_user_logged() and bpy.context.mode == 'OBJECT'
+    if not icosa_props.icosa_api.is_user_logged():
         downloadlabel = 'Log in to download models'
     elif bpy.context.mode != 'OBJECT':
         downloadlabel = "Import is available only in object mode"
@@ -921,8 +921,8 @@ def draw_import_button(layout, model, context):
         downloadlabel = "Import model"
         if model.download_size:
             downloadlabel += " ({})".format(model.download_size)
-    if skfb.import_status:
-        downloadlabel = skfb.import_status
+    if icosa_props.import_status:
+        downloadlabel = icosa_props.import_status
 
     download_icon = 'IMPORT' if import_ops.enabled else 'INFO'
     import_ops.scale_y = 2.0
@@ -1025,34 +1025,34 @@ def parse_results(r, *args, **kwargs):
 
     ongoingSearches.discard(r.url)
 
-    skfb = get_icosa_props()
+    icosa_props = get_icosa_props()
     json_data = r.json()
 
-    if 'current' in skfb.search_results:
-        skfb.search_results['current'].clear()
-        del skfb.search_results['current']
+    if 'current' in icosa_props.search_results:
+        icosa_props.search_results['current'].clear()
+        del icosa_props.search_results['current']
 
-    skfb.search_results['current'] = OrderedDict()
+    icosa_props.search_results['current'] = OrderedDict()
 
     for result in list(json_data.get('assets', [])):
 
         # Dirty fix to avoid parsing obsolete data
-        if 'current' not in skfb.search_results:
+        if 'current' not in icosa_props.search_results:
             return
 
         asset_id = result['assetId']
-        skfb.search_results['current'][result['assetId']] = IcosaModel(result)
+        icosa_props.search_results['current'][result['assetId']] = IcosaModel(result)
 
         if not os.path.exists(os.path.join(Config.ICOSA_THUMB_DIR, asset_id) + '.png'):
-            skfb.skfb_api.request_thumbnail(result['thumbnail'], asset_id)
-        elif asset_id not in skfb.custom_icons:
-            skfb.custom_icons.load(asset_id, os.path.join(Config.ICOSA_THUMB_DIR, "{}.png".format(asset_id)), 'IMAGE')
+            icosa_props.icosa_api.request_thumbnail(result['thumbnail'], asset_id)
+        elif asset_id not in icosa_props.custom_icons:
+            icosa_props.custom_icons.load(asset_id, os.path.join(Config.ICOSA_THUMB_DIR, "{}.png".format(asset_id)), 'IMAGE')
 
         # Make a request to get the download_size for own models
         """
-        model = skfb.search_results['current'][result['assetId']]
+        model = icosa_props.search_results['current'][result['assetId']]
         if model.download_size is None:
-            api = skfb.skfb_api
+            api = icosa_props.icosa_api
             def set_download_size(r, *args, **kwargs):
                 json_data = r.json()
                 print(json_data)
@@ -1070,13 +1070,13 @@ def parse_results(r, *args, **kwargs):
         url_without_page_token = urllib.parse.urlunparse(
             parsed_url._replace(query=urllib.parse.urlencode(query_params, doseq=True)))
         next_page = int(json_data['nextPageToken'])
-        skfb.skfb_api.next_results_url = f"{url_without_page_token}&pageToken={next_page}"
+        icosa_props.icosa_api.next_results_url = f"{url_without_page_token}&pageToken={next_page}"
         # This assumes page tokens are sequential integers
         # Currently true, but might change in the future
-        skfb.skfb_api.prev_results_url = f"{url_without_page_token}&pageToken={next_page - 1}"
+        icosa_props.icosa_api.prev_results_url = f"{url_without_page_token}&pageToken={next_page - 1}"
     else:
-        skfb.skfb_api.next_results_url = None
-        skfb.skfb_api.prev_results_url = None
+        icosa_props.icosa_api.next_results_url = None
+        icosa_props.icosa_api.prev_results_url = None
 
 
 class ThumbnailCollector(threading.Thread):
@@ -1136,14 +1136,14 @@ class LoginModal(bpy.types.Operator):
     # def handle_mail_login(self, r, *args, **kwargs):
     #     browser_props = get_icosa_props()
     #     if r.status_code == 200 and 'access_token' in r.json():
-    #         browser_props.skfb_api.access_token = r.json()['access_token']
+    #         browser_props.icosa_api.access_token = r.json()['access_token']
     #         login_props = get_icosa_login_props()
     #         Cache.save_key('username', login_props.email)
-    #         Cache.save_key('access_token', browser_props.skfb_api.access_token)
+    #         Cache.save_key('access_token', browser_props.icosa_api.access_token)
     #
-    #         browser_props.skfb_api.build_headers()
+    #         browser_props.icosa_api.build_headers()
     #         set_login_status('INFO', '')
-    #         browser_props.skfb_api.request_user_info()
+    #         browser_props.icosa_api.request_user_info()
     #
     #     else:
     #         if 'error_description' in r.json():
@@ -1157,13 +1157,13 @@ class LoginModal(bpy.types.Operator):
     def handle_device_login(self, r, *args, **kwargs):
         browser_props = get_icosa_props()
         if r.status_code == 200 and 'access_token' in r.json():
-            browser_props.skfb_api.access_token = r.json()['access_token']
+            browser_props.icosa_api.access_token = r.json()['access_token']
             login_props = get_icosa_login_props()
-            Cache.save_key('access_token', browser_props.skfb_api.access_token)
+            Cache.save_key('access_token', browser_props.icosa_api.access_token)
 
-            browser_props.skfb_api.build_headers()
+            browser_props.icosa_api.build_headers()
             set_login_status('INFO', '')
-            browser_props.skfb_api.request_user_info()
+            browser_props.icosa_api.request_user_info()
 
         else:
             set_login_status(f'ERROR', f'Device code failed: {r.status_code} {r.text}')
@@ -1173,13 +1173,13 @@ class LoginModal(bpy.types.Operator):
 
     def handle_token_login(self, api_token):
         browser_props = get_icosa_props()
-        browser_props.skfb_api.api_token = api_token
+        browser_props.icosa_api.api_token = api_token
         login_props = get_icosa_login_props()
         Cache.save_key('api_token', login_props.api_token)
 
-        browser_props.skfb_api.build_headers()
+        browser_props.icosa_api.build_headers()
         set_login_status('INFO', '')
-        browser_props.skfb_api.request_user_info()
+        browser_props.icosa_api.request_user_info()
         self.is_logging = False
 
     def modal(self, context, event):
@@ -1305,20 +1305,20 @@ class IcosaPanel(View3DPanel, bpy.types.Panel):
 
     def draw(self, context):
 
-        skfb = get_icosa_props()
+        icosa_props = get_icosa_props()
 
-        if skfb.is_latest_version == 1:
+        if icosa_props.is_latest_version == 1:
             self.bl_label = "Icosa Gallery plugin v{} (up-to-date)".format(PLUGIN_VERSION)
-        elif skfb.is_latest_version == 0:
+        elif icosa_props.is_latest_version == 0:
             self.bl_label = "Icosa Gallery plugin v{} (outdated)".format(PLUGIN_VERSION)
-            self.layout.operator('wm.skfb_new_version', text='New version available', icon='ERROR')
-        elif skfb.is_latest_version == -2:
+            self.layout.operator('wm.icosa_new_version', text='New version available', icon='ERROR')
+        elif icosa_props.is_latest_version == -2:
             self.bl_label = "Icosa Gallery plugin v{}".format(PLUGIN_VERSION)
 
         # External links
         #doc_ui = self.layout.row()
-        self.layout.operator('wm.skfb_help', text='Documentation', icon='QUESTION')
-        self.layout.operator('wm.skfb_report_issue', text='Report an issue', icon='ERROR')
+        self.layout.operator('wm.icosa_help', text='Documentation', icon='QUESTION')
+        self.layout.operator('wm.icosa_report_issue', text='Report an issue', icon='ERROR')
         self.layout.label(text="Download folder:")
         self.layout.label(text="  " + Config.ICOSA_TEMP_DIR)
 
@@ -1332,43 +1332,43 @@ class LoginPanel(View3DPanel, bpy.types.Panel):
     def draw(self, context):
         global is_plugin_enabled
         if not is_plugin_enabled:
-            self.layout.operator('wm.skfb_enable', text='Activate add-on', icon="LINKED").enable = True
+            self.layout.operator('wm.icosa_enable', text='Activate add-on', icon="LINKED").enable = True
         else:
             # LOGIN
-            skfb_login = get_icosa_login_props()
+            icosa_login = get_icosa_login_props()
             layout = self.layout.box().column(align=True)
             layout.enabled = get_plugin_enabled()
-            if skfb_login.skfb_api.is_user_logged():
+            if icosa_login.icosa_api.is_user_logged():
                 login_row = layout.row()
-                login_row.label(text='Logged in as {}'.format(skfb_login.skfb_api.get_user_info()))
+                login_row.label(text='Logged in as {}'.format(icosa_login.icosa_api.get_user_info()))
                 login_row.operator('wm.icosa_login', text='Logout', icon='DISCLOSURE_TRI_RIGHT').authenticate = False
-                if skfb_login.status:
-                    layout.prop(skfb_login, 'status', icon=skfb_login.status_type)
+                if icosa_login.status:
+                    layout.prop(icosa_login, 'status', icon=icosa_login.status_type)
             else:
                 layout.label(text="Login to your Icosa Gallery account", icon='INFO')
                 ops_row = layout.row()
                 ops_row.operator('wm.icosa_signup', text='Create an account', icon='PLUS')
 
                 # Disabled for now
-                # layout.prop(skfb_login, "use_mail")
+                # layout.prop(icosa_login, "use_mail")
 
                 # The only option so no need for a checkbox
-                # layout.prop(skfb_login, "use_device_code")
+                # layout.prop(icosa_login, "use_device_code")
 
-                if skfb_login.use_mail:
-                    layout.prop(skfb_login, "email")
-                    layout.prop(skfb_login, "password")
-                elif skfb_login.use_device_code:
+                if icosa_login.use_mail:
+                    layout.prop(icosa_login, "email")
+                    layout.prop(icosa_login, "password")
+                elif icosa_login.use_device_code:
                     ops_row = layout.row()
                     ops_row.operator('wm.icosa_get_device_code', text='Get a device code', icon='PLUS')
-                    layout.prop(skfb_login, "device_code")
+                    layout.prop(icosa_login, "device_code")
                 else:
-                    layout.prop(skfb_login, "api_token")
+                    layout.prop(icosa_login, "api_token")
                 login_icon = "LINKED" if bpy.app.version < (2, 80, 0) else "USER"
                 ops_row = layout.row()
                 ops_row.operator('wm.icosa_login', text='Log in', icon=login_icon).authenticate = True
-                if skfb_login.status:
-                    layout.prop(skfb_login, 'status', icon=skfb_login.status_type)
+                if icosa_login.status:
+                    layout.prop(icosa_login, 'status', icon=icosa_login.status_type)
 
 
 class Model:
@@ -1387,7 +1387,7 @@ class IcosaBrowse(View3DPanel, bpy.types.Panel):
     def draw_search(self, layout, context):
         prop = get_icosa_props()
         props = get_icosa_props_proxy()
-        skfb_api = prop.skfb_api
+        icosa_api = prop.icosa_api
 
         # Add an option to import from url or assetId
         col = layout.box().column(align=True)
@@ -1404,7 +1404,7 @@ class IcosaBrowse(View3DPanel, bpy.types.Panel):
             ro.label(text="Search")
             domain_col = ro.column()
             domain_col.scale_x = 1.5
-            domain_col.enabled = skfb_api.is_user_logged()
+            domain_col.enabled = icosa_api.is_user_logged()
             domain_col.prop(props, "search_domain")
 
             ro = col.row()
@@ -1443,10 +1443,10 @@ class IcosaBrowse(View3DPanel, bpy.types.Panel):
             model = None
 
             result_pages_ops = col.row()
-            if props.skfb_api.prev_results_url:
+            if props.icosa_api.prev_results_url:
                 result_pages_ops.operator("wm.icosa_search_prev", text="Previous page", icon='FRAME_PREV')
 
-            if props.skfb_api.next_results_url:
+            if props.icosa_api.next_results_url:
                 result_pages_ops.operator("wm.icosa_search_next", text="Next page", icon='FRAME_NEXT')
 
             #result_label = 'Click below to see more results'
@@ -1478,7 +1478,7 @@ class IcosaBrowse(View3DPanel, bpy.types.Panel):
 
                     if not model.info_requested:
                         # TODO
-                        # props.skfb_api.request_model_info(model.asset_id)
+                        # props.icosa_api.request_model_info(model.asset_id)
                         model.info_requested = True
 
                 draw_model_info(col, model, context)
@@ -1508,7 +1508,7 @@ class IcosaExportPanel(View3DPanel, bpy.types.Panel):
 
     def draw(self, context):
 
-        api = get_icosa_props().skfb_api
+        api = get_icosa_props().icosa_api
         self.layout.enabled = get_plugin_enabled() and api.is_user_logged()
 
         wm = context.window_manager
@@ -1552,9 +1552,9 @@ class IcosaLogger(bpy.types.Operator):
         set_login_status('FILE_REFRESH', 'Login to your Icosa Gallery account...')
         wm = context.window_manager
         if self.authenticate:
-            wm.icosa_browser.skfb_api.login(wm.icosa_api.email, wm.icosa_api.password, wm.icosa_api.api_token)
+            wm.icosa_browser.icosa_api.login(wm.icosa_api.email, wm.icosa_api.password, wm.icosa_api.api_token)
         else:
-            wm.icosa_browser.skfb_api.logout()
+            wm.icosa_browser.icosa_api.logout()
             wm.icosa_api.password = ''
             wm.icosa_api.last_password = "default"
             set_login_status('FILE_REFRESH', '')
@@ -1614,8 +1614,8 @@ class IcosaDownloadModel(bpy.types.Operator):
     asset_id: bpy.props.StringProperty(name="assetId")
 
     def execute(self, context):
-        skfb_api = context.window_manager.icosa_browser.skfb_api
-        skfb_api.download_model(self.asset_id)
+        icosa_api = context.window_manager.icosa_browser.icosa_api
+        icosa_api.download_model(self.asset_id)
         return {'FINISHED'}
 
 
@@ -1634,10 +1634,10 @@ class ViewOnIcosaGallery(bpy.types.Operator):
 
 
 def clear_search():
-    skfb = get_icosa_props()
-    skfb.has_loaded_thumbnails = False
-    skfb.search_results.clear()
-    skfb.custom_icons.clear()
+    icosa_props = get_icosa_props()
+    icosa_props.has_loaded_thumbnails = False
+    icosa_props.search_results.clear()
+    icosa_props.custom_icons.clear()
     bpy.data.window_managers['WinMan']['result_previews'] = 0
 
 
@@ -1652,11 +1652,11 @@ class IcosaSearch(bpy.types.Operator):
     def execute(self, context):
         # prepare request for search
         clear_search()
-        skfb = get_icosa_props()
-        skfb.skfb_api.prev_results_url = None
-        skfb.skfb_api.next_results_url = None
-        final_query = build_search_request(skfb.query, skfb.curated, skfb.include_tiltbrush, skfb.face_count, skfb.categories, skfb.sort_by)
-        skfb.skfb_api.search(final_query, parse_results)
+        icosa_props = get_icosa_props()
+        icosa_props.icosa_api.prev_results_url = None
+        icosa_props.icosa_api.next_results_url = None
+        final_query = build_search_request(icosa_props.query, icosa_props.curated, icosa_props.include_tiltbrush, icosa_props.face_count, icosa_props.categories, icosa_props.sort_by)
+        icosa_props.icosa_api.search(final_query, parse_results)
         return {'FINISHED'}
 
 
@@ -1669,8 +1669,8 @@ class IcosaSearchNextResults(bpy.types.Operator):
     def execute(self, context):
         # prepare request for search
         clear_search()
-        skfb_api = get_icosa_props().skfb_api
-        skfb_api.search_cursor(skfb_api.next_results_url, parse_results)
+        icosa_api = get_icosa_props().icosa_api
+        icosa_api.search_cursor(icosa_api.next_results_url, parse_results)
         return {'FINISHED'}
 
 
@@ -1683,8 +1683,8 @@ class IcosaSearchPreviousResults(bpy.types.Operator):
     def execute(self, context):
         # prepare request for search
         clear_search()
-        skfb_api = get_icosa_props().skfb_api
-        skfb_api.search_cursor(skfb_api.prev_results_url, parse_results)
+        icosa_api = get_icosa_props().icosa_api
+        icosa_api.search_cursor(icosa_api.prev_results_url, parse_results)
         return {'FINISHED'}
 
 class IcosaCreateAccount(bpy.types.Operator):
@@ -1713,7 +1713,7 @@ class IcosaGetDeviceCode(bpy.types.Operator):
 
 class IcosaNewVersion(bpy.types.Operator):
     """Opens addon latest available release on github"""
-    bl_idname = "wm.skfb_new_version"
+    bl_idname = "wm.icosa_new_version"
     bl_label = "Icosa Gallery"
     bl_options = {'INTERNAL'}
 
@@ -1725,7 +1725,7 @@ class IcosaNewVersion(bpy.types.Operator):
 
 class IcosaReportIssue(bpy.types.Operator):
     """Open an issue on github tracker"""
-    bl_idname = "wm.skfb_report_issue"
+    bl_idname = "wm.icosa_report_issue"
     bl_label = "Icosa Gallery"
     bl_options = {'INTERNAL'}
 
@@ -1737,7 +1737,7 @@ class IcosaReportIssue(bpy.types.Operator):
 
 class IcosaHelp(bpy.types.Operator):
     """Opens the addon README on github"""
-    bl_idname = "wm.skfb_help"
+    bl_idname = "wm.icosa_help"
     bl_label = "Icosa Gallery"
     bl_options = {'INTERNAL'}
 
@@ -1758,17 +1758,17 @@ def activate_plugin():
         login.email = cache_data['username']
 
     if 'access_token' in cache_data:
-        props.skfb_api.access_token = cache_data['access_token']
-        props.skfb_api.build_headers()
-        props.skfb_api.request_user_info()
-        props.skfb_api.use_mail = False
-        props.skfb_api.use_device_code = True
+        props.icosa_api.access_token = cache_data['access_token']
+        props.icosa_api.build_headers()
+        props.icosa_api.request_user_info()
+        props.icosa_api.use_mail = False
+        props.icosa_api.use_device_code = True
     elif 'api_token' in cache_data:
-        props.skfb_api.api_token = cache_data['api_token']
-        props.skfb_api.build_headers()
-        props.skfb_api.request_user_info()
-        props.skfb_api.use_mail = False
-        props.skfb_api.use_device_code = False
+        props.icosa_api.api_token = cache_data['api_token']
+        props.icosa_api.build_headers()
+        props.icosa_api.request_user_info()
+        props.icosa_api.use_mail = False
+        props.icosa_api.use_device_code = False
 
     global is_plugin_enabled
     is_plugin_enabled = True
@@ -1784,7 +1784,7 @@ def activate_plugin():
 
 class IcosaEnable(bpy.types.Operator):
     """Activate the addon (checks login, cache folders...)"""
-    bl_idname = "wm.skfb_enable"
+    bl_idname = "wm.icosa_enable"
     bl_label = "Icosa Gallery"
     bl_options = {'INTERNAL'}
 
@@ -1845,7 +1845,7 @@ def upload_report(report_message, report_type):
 def upload_as_multipart(filepath, filename):
     """Upload file using multipart form encoding instead of JSON"""
     props = get_icosa_props()
-    api = props.skfb_api
+    api = props.icosa_api
 
     # Create form data
     form = {
@@ -2098,31 +2098,31 @@ classes = (
 # TODO
 # def check_plugin_version(request, *args, **kwargs):
 #     response = request.json()
-#     skfb = get_icosa_props()
+#     icosa_props = get_icosa_props()
 #     if response and len(response):
 #         latest_release_version = response[0]['tag_name'].replace('.', '')
 #         current_version = str(bl_info['version']).replace(',', '').replace('(', '').replace(')', '').replace(' ', '')
 #
 #         if latest_release_version == current_version:
 #             print('You are using the latest version({})'.format(response[0]['tag_name']))
-#             skfb.is_latest_version = 1
+#             icosa_props.is_latest_version = 1
 #         else:
 #             print('A new version is available: {}'.format(response[0]['tag_name']))
-#             skfb.is_latest_version = 0
+#             icosa_props.is_latest_version = 0
 #     else:
 #         print('Failed to retrieve plugin version')
-#         skfb.is_latest_version = -2
+#         icosa_props.is_latest_version = -2
 
 def register():
     icosa_icon = bpy.utils.previews.new()
     icons_dir      = os.path.dirname(__file__)
-    icosa_icon.load("skfb", os.path.join(icons_dir, "logo.png"), 'IMAGE')
+    icosa_icon.load("icosa_icon", os.path.join(icons_dir, "logo.png"), 'IMAGE')
     icosa_icon.load("0",    os.path.join(icons_dir, "placeholder.png"), 'IMAGE')
 
     res = []
     res.append(('NORESULTS', 'empty', "", icosa_icon['0'].icon_id, 0))
     preview_collection['default'] = tuple(res)
-    preview_collection['skfb'] = icosa_icon
+    preview_collection['icosa_icon'] = icosa_icon
     bpy.types.WindowManager.result_previews = EnumProperty(items=list_current_results)
 
     for cls in classes:
@@ -2145,7 +2145,7 @@ def unregister():
     del bpy.types.WindowManager.icosa_browser_proxy
     del bpy.types.WindowManager.icosa_export
 
-    bpy.utils.previews.remove(preview_collection['skfb'])
+    bpy.utils.previews.remove(preview_collection['icosa_icon'])
     del bpy.types.WindowManager.result_previews
     Utils.clean_thumbnail_directory()
 
