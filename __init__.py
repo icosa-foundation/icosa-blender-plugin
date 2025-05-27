@@ -189,6 +189,7 @@ class Utils:
     def thumbnail_file_exists(asset_id):
         return os.path.exists(os.path.join(Config.ICOSA_THUMB_DIR, '{}.png'.format(asset_id)))
 
+    @staticmethod
     def clean_thumbnail_directory():
         if not os.path.exists(Config.ICOSA_THUMB_DIR):
             return
@@ -204,6 +205,7 @@ class Utils:
         best_thumbnail = thumbnails_json['url']
         return best_thumbnail
 
+    @staticmethod
     def setup_plugin():
         if not os.path.exists(Config.ICOSA_THUMB_DIR):
             os.makedirs(Config.ICOSA_THUMB_DIR)
@@ -277,6 +279,7 @@ class Cache:
         ".cache"
     )  # Use a user path to avoid permission-related errors
 
+    @staticmethod
     def read():
         if not os.path.exists(Cache.ICOSA_CACHE_FILE):
             return {}
@@ -373,10 +376,6 @@ def set_import_status(status):
 
 # Simple wrapper around requests.get for debugging purposes
 def requests_get(*args, **kwargs):
-    # url = args[0]
-    # print("______________________________")
-    # print(url)
-    # print("-----------------------------")
     return requests.get(*args, **kwargs)
 
 
