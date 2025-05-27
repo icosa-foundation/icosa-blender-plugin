@@ -84,15 +84,12 @@ class Config:
     ICOSA_DEVICE_AUTH = f'{ICOSA_API}/login/device_login'
 
     ICOSA_ME = f'{ICOSA_API}/users/me'
+
+    # Always filter by remixable except for your own models
     BASE_SEARCH_OWN_MODELS = f'{ICOSA_ME}/assets?'
-    BASE_SEARCH_LIKED_MODELS = f'{ICOSA_ME}/likedassets?'
-
-    ICOSA_SEARCH = f'{ICOSA_API}/assets?'
-    BASE_SEARCH = f'{ICOSA_SEARCH}'
-    DEFAULT_FLAGS = f'orderBy=BEST&license=REMIXABLE&format=-TILT'
-    DEFAULT_SEARCH = f'{BASE_SEARCH}{DEFAULT_FLAGS}'
-
-    # PURCHASED_MODELS = ICOSA_ME + "/models/purchases?type=models"
+    BASE_SEARCH_LIKED_MODELS = f'{ICOSA_ME}/likedassets?license=REMIXABLE&'
+    BASE_SEARCH = f'{ICOSA_API}/assets?license=REMIXABLE'
+    DEFAULT_SEARCH = f'{BASE_SEARCH}&orderBy=BEST&format=-TILT' # TODO remove the need for this
 
     ICOSA_PLUGIN_VERSION = '{}/releases'.format(GITHUB_REPOSITORY_API_URL)
 
