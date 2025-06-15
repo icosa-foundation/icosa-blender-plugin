@@ -80,7 +80,7 @@ class Config:
     ICOSA_API = 'https://api.icosa.gallery/v1'
 
     ICOSA_MODEL = f'{ICOSA_API}/assets'
-    ICOSA_UPLOAD = f'{ICOSA_API}/assets'
+    ICOSA_UPLOAD = f'{ICOSA_API}/user/me/assets'
     ICOSA_DEVICE_AUTH = f'{ICOSA_API}/login/device_login'
 
     ICOSA_ME = f'{ICOSA_API}/users/me'
@@ -89,7 +89,9 @@ class Config:
     BASE_SEARCH_OWN_MODELS = f'{ICOSA_ME}/assets?'
     BASE_SEARCH_LIKED_MODELS = f'{ICOSA_ME}/likedassets?license=REMIXABLE&'
     BASE_SEARCH = f'{ICOSA_API}/assets?license=REMIXABLE'
-    DEFAULT_SEARCH = f'{BASE_SEARCH}&orderBy=BEST&format=-TILT' # TODO remove the need for this
+    # TODO remove the need for default search
+    # Instead construct it from the initial UI values
+    DEFAULT_SEARCH = f'{BASE_SEARCH}&orderBy=BEST&format=-TILT'
 
     ICOSA_PLUGIN_VERSION = '{}/releases'.format(GITHUB_REPOSITORY_API_URL)
 
