@@ -28,6 +28,38 @@ sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 ICOSA_EXPORT_TEMP_DIR = sys.argv[7]
 ICOSA_EXPORT_DATA_FILE = os.path.join(ICOSA_EXPORT_TEMP_DIR, "export-icosa.json")
 
+# Render a thumbnail of the scene
+def render_thumbnail(export_settings):
+    scene = bpy.context.scene
+
+    # Store original render settings
+    original_resolution_x = scene.render.resolution_x
+    original_resolution_y = scene.render.resolution_y
+    original_resolution_percentage = scene.render.resolution_percentage
+    original_file_format = scene.render.image_settings.file_format
+    original_filepath = scene.render.filepath
+
+    # Set render settings for thumbnail
+    scene.render.resolution_x = 1920
+    scene.render.resolution_y = 1080
+    scene.render.resolution_percentage = 100
+    scene.render.image_settings.file_format = 'PNG'
+
+    thumbnail_path = os.path.join(ICOSA_EXPORT_TEMP_DIR, "thumbnail.png")
+    scene.render.filepath = thumbnail_path
+
+    # Render the current scene
+    bpy.ops.render.render(write_still=True)
+
+    # Restore original render settings
+    scene.render.resolution_x = original_resolution_x
+    scene.render.resolution_y = original_resolution_y
+    scene.render.resolution_percentage = original_resolution_percentage
+    scene.render.image_settings.file_format = original_file_format
+    scene.render.filepath = original_filepath
+
+    return thumbnail_path
+
 # save a copy of the current blendfile
 def save_glb(export_settings):
     import time
@@ -49,10 +81,15 @@ def save_glb(export_settings):
         export_apply=True  # Apply modifiers
     )
 
-    # Zip the GLB file
+    # Render thumbnail
+    thumbnail_path = render_thumbnail(export_settings)
+
+    # Zip the GLB file and thumbnail
     zip_filepath = filepath + ".zip"
     with zipfile.ZipFile(zip_filepath, 'w', zipfile.ZIP_DEFLATED) as zipf:
         zipf.write(filepath, filename)
+        if os.path.exists(thumbnail_path):
+            zipf.write(thumbnail_path, "thumbnail.png")
     zip_filename = os.path.basename(zip_filepath)
     print("----------------------------------")
     print("Packed file: ", zip_filepath)
