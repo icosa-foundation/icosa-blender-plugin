@@ -1838,8 +1838,9 @@ del _IcosaState
 # remove file copy
 def terminate(filepath):
     print(filepath)
-    os.remove(filepath)
-    os.rmdir(os.path.dirname(filepath))
+    tempdir = os.path.dirname(filepath)
+    if os.path.exists(tempdir):
+        shutil.rmtree(tempdir)
 
 def upload_report(report_message, report_type):
     sf_state.report_message = report_message
