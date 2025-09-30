@@ -1886,6 +1886,10 @@ def upload_as_multipart(filepath, filename):
             sf_state.model_url = Config.ICOSA_URL + "/view/" + modelUid
             sf_state.publish_url = ""
 
+        # Open uploads page in browser
+        import webbrowser
+        webbrowser.open(Config.ICOSA_URL + "/uploads")
+
         return upload_report("Upload complete. Available on your icosa.gallery dashboard.", 'INFO')
 
 
