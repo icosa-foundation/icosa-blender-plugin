@@ -968,6 +968,213 @@ def run_async(func):
     return async_func
 
 
+def convert_material_name(material_name, suffix_pattern):
+    """
+    Convert material name using the following algorithm:
+    1. Strip common prefixes off incoming material names
+    2. Look up in GUID mapping dictionary
+    3. If no match, add "ob-" prefix to incoming material
+    4. All matching is case-insensitive
+
+    Args:
+        material_name: Original material name from GLTF
+        suffix_pattern: Pattern to remove (e.g., '.001') - deprecated but kept for compatibility
+
+    Returns:
+        Converted material name for matching with library
+    """
+    import re
+    from . import name_mapping
+
+    # Step 1: Strip common prefixes
+    cleaned_name = material_name
+    common_prefixes = ['material_', 'mat_', 'brush_', 'tilt_']
+    for prefix in common_prefixes:
+        if cleaned_name.lower().startswith(prefix):
+            cleaned_name = cleaned_name[len(prefix):]
+            break
+
+    # Step 2: Check if this is a GUID and look it up in name_mapping
+    # GUIDs are in format: xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx
+    if re.match(r'^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$', cleaned_name):
+        mapped_name = name_mapping.name_mapping.get(cleaned_name.lower())
+        if mapped_name:
+            return mapped_name
+
+    # Step 3: Return cleaned name as-is (caller will try with "ob-" prefix if needed)
+    return cleaned_name
+
+
+def get_material_library_path():
+    """
+    Get the material library path, checking for default bundled file first
+
+    Returns:
+        Path to material library .blend file, or None if not found
+    """
+    # Get preferences
+    preferences = bpy.context.preferences.addons[__name__.split('.')[0]].preferences
+
+    # Check if user has specified a custom library path
+    if preferences.materialLibraryPath and os.path.exists(preferences.materialLibraryPath):
+        return preferences.materialLibraryPath
+
+    # Check for default bundled library file
+    addon_dir = os.path.dirname(os.path.realpath(__file__))
+    default_library = os.path.join(addon_dir, "openbrush-materials.blend")
+
+    if os.path.exists(default_library):
+        return default_library
+
+    return None
+
+
+def swap_materials_from_library(imported_objects, asset_id):
+    """
+    Swap materials from imported GLTF with materials from library .blend file
+
+    Args:
+        imported_objects: List of newly imported objects
+        asset_id: Asset ID of the imported model
+    """
+    try:
+        # Get material library path (checks for default bundled file)
+        library_path = get_material_library_path()
+
+        if not library_path:
+            print("Material library not configured or not found")
+            return
+
+        # Get suffix pattern from preferences
+        preferences = bpy.context.preferences.addons[__name__.split('.')[0]].preferences
+        suffix_pattern = preferences.materialSuffixPattern
+
+        print(f"Using material library: {library_path}")
+
+        # Collect all materials used by imported objects
+        imported_materials = set()
+        material_to_objects = {}  # Track which objects use which materials
+
+        for obj in imported_objects:
+            if obj.type == 'MESH':
+                for mat_slot in obj.material_slots:
+                    if mat_slot.material:
+                        mat_name = mat_slot.material.name
+                        imported_materials.add(mat_name)
+                        if mat_name not in material_to_objects:
+                            material_to_objects[mat_name] = []
+                        material_to_objects[mat_name].append((obj, mat_slot))
+
+        if not imported_materials:
+            print("No materials found on imported objects")
+            return
+
+        # Get list of existing materials before append (to track what gets added)
+        existing_materials = set(bpy.data.materials[:])
+
+        # Load materials from library blend file
+        materials_to_append = {}  # Maps: imported_mat_name -> library_mat_name_to_append
+        with bpy.data.libraries.load(library_path, link=False) as (data_from, data_to):
+            # Get all available material names
+            available_materials = data_from.materials
+
+            # Check for duplicate base names in library
+            base_names = {}
+            for mat_name in available_materials:
+                # Strip numeric suffixes to find base name
+                import re
+                base = re.sub(r'\.\d{3}$', '', mat_name)
+                if base not in base_names:
+                    base_names[base] = []
+                base_names[base].append(mat_name)
+
+            # Warn about duplicates
+            for base, variants in base_names.items():
+                if len(variants) > 1:
+                    print(f"Warning: Library contains multiple variants of '{base}': {variants}")
+
+            # Create case-insensitive lookup for available materials
+            available_materials_lower = {mat.lower(): mat for mat in available_materials}
+
+            # Match imported materials with library materials
+            for imported_mat_name in imported_materials:
+                converted_name = convert_material_name(imported_mat_name, suffix_pattern)
+                matched_material = None
+
+                # Try case-insensitive match with converted name
+                if converted_name.lower() in available_materials_lower:
+                    matched_material = available_materials_lower[converted_name.lower()]
+                # Try with "ob-" prefix added (case-insensitive)
+                elif ("ob-" + converted_name).lower() in available_materials_lower:
+                    matched_material = available_materials_lower[("ob-" + converted_name).lower()]
+                # Try original name as fallback (case-insensitive)
+                elif imported_mat_name.lower() in available_materials_lower:
+                    matched_material = available_materials_lower[imported_mat_name.lower()]
+
+                if matched_material:
+                    materials_to_append[imported_mat_name] = matched_material
+                else:
+                    print(f"No match found in library for material: {imported_mat_name}")
+
+            # Append only the materials we need (don't rely on names after this)
+            data_to.materials = [materials_to_append[name] for name in materials_to_append]
+
+        # Identify the newly appended materials by comparing before/after
+        newly_appended = [mat for mat in bpy.data.materials if mat not in existing_materials]
+
+        # Create mapping: library_name_we_requested -> actual_material_object_we_got
+        library_name_to_material = {}
+        for mat in newly_appended:
+            # Try to match back to what we requested
+            # The appended material's name might have .001 etc added by Blender
+            mat_base = mat.name
+            # Strip any numeric suffix that Blender might have added
+            import re
+            mat_base_stripped = re.sub(r'\.\d{3}$', '', mat_base)
+
+            # Match back to our requested library names
+            for imported_name, library_name in materials_to_append.items():
+                library_base = re.sub(r'\.\d{3}$', '', library_name)
+                if mat_base == library_name or mat_base_stripped == library_base:
+                    library_name_to_material[imported_name] = mat
+                    break
+
+        # Now swap the materials using the actual material objects
+        swapped_count = 0
+        for imported_mat_name in materials_to_append.keys():
+            # Get the actual library material object
+            library_mat = library_name_to_material.get(imported_mat_name)
+            if not library_mat:
+                print(f"Warning: Could not find appended material for: {imported_mat_name}")
+                continue
+
+            # Get the imported material we're replacing
+            imported_mat = bpy.data.materials.get(imported_mat_name)
+
+            # Replace material on all objects that use it
+            if imported_mat_name in material_to_objects:
+                for obj, mat_slot in material_to_objects[imported_mat_name]:
+                    mat_slot.material = library_mat
+                    swapped_count += 1
+
+                # Remove the old imported material if it's no longer in use
+                if imported_mat and imported_mat.users == 0:
+                    bpy.data.materials.remove(imported_mat)
+
+                print(f"Swapped material: {imported_mat_name} -> {library_mat.name}")
+
+        if swapped_count > 0:
+            set_import_status(f'Swapped {swapped_count} materials from library')
+            print(f"Material swap complete: {swapped_count} material slots updated")
+        else:
+            print("No materials were swapped (no matches found in library)")
+
+    except Exception as e:
+        print(f"Error swapping materials: {e}")
+        import traceback
+        traceback.print_exc()
+
+
 def import_model(gltf_path, asset_id, title):
     bpy.ops.wm.import_modal('INVOKE_DEFAULT', gltf_path=gltf_path, asset_id=asset_id, title=title)
 
@@ -1261,9 +1468,16 @@ class ImportModalOperator(bpy.types.Operator):
                     json.dump(gltf_json, f, indent=4)
 
             bpy.ops.import_scene.gltf(filepath=self.gltf_path)
+
+            # Get the newly imported objects
+            imported_objects = [o for o in bpy.data.objects if o.name not in old_objects]
+
+            # Swap materials from library if configured
+            swap_materials_from_library(imported_objects, self.asset_id)
+
             set_import_status('')
             Utils.clean_downloaded_model_dir(self.asset_id)
-            Utils.clean_node_hierarchy([o for o in bpy.data.objects if o.name not in old_objects], self.title)
+            Utils.clean_node_hierarchy(imported_objects, self.title)
             return {'FINISHED'}
         except Exception:
             import traceback
@@ -2066,10 +2280,48 @@ class IcosaAddonPreferences(bpy.types.AddonPreferences):
         ),
         subtype='FILE_PATH'
     )
+    materialLibraryPath: StringProperty(
+        name="Material library file",
+        description=(
+            ".blend file containing material library for imported models\n"
+            "When set, materials from imported GLTF files will be swapped\n"
+            "with matching materials from this library by name"
+        ),
+        subtype='FILE_PATH'
+    )
+    materialSuffixPattern: StringProperty(
+        name="Material suffix to remove",
+        description=(
+            "Pattern to remove from material names when matching\n"
+            "Example: '.001' to match 'Material.001' with 'Material'"
+        ),
+        default=""
+    )
     def draw(self, context):
         layout = self.layout
         layout.prop(self, "cachePath", text="Download directory")
         layout.prop(self, "downloadHistory", text="Download history (.csv)")
+        layout.separator()
+        layout.label(text="Material Swapping:")
+
+        # Show status of material library
+        library_path = get_material_library_path()
+        if library_path:
+            addon_dir = os.path.dirname(os.path.realpath(__file__))
+            default_library = os.path.join(addon_dir, "openbrush-materials.blend")
+
+            if library_path == default_library:
+                box = layout.box()
+                box.label(text="Using bundled Open Brush materials", icon='CHECKMARK')
+            else:
+                box = layout.box()
+                box.label(text="Using custom material library", icon='CHECKMARK')
+        else:
+            box = layout.box()
+            box.label(text="No material library found", icon='ERROR')
+
+        layout.prop(self, "materialLibraryPath", text="Custom library (.blend)")
+        layout.prop(self, "materialSuffixPattern", text="Suffix to remove")
 
 classes = (
     IcosaAddonPreferences,
