@@ -80,7 +80,7 @@ class Config:
     ICOSA_API = 'https://api.icosa.gallery/v1'
 
     ICOSA_MODEL = f'{ICOSA_API}/assets'
-    ICOSA_UPLOAD = f'{ICOSA_API}/user/me/assets'
+    ICOSA_UPLOAD = f'{ICOSA_API}/users/me/assets'
     ICOSA_DEVICE_AUTH = f'{ICOSA_API}/login/device_login'
 
     ICOSA_ME = f'{ICOSA_API}/users/me'
