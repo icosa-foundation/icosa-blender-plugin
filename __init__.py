@@ -545,8 +545,6 @@ class IcosaApi:
 
     def get_download(self, main_url, additional_urls, asset_id, title):
 
-        print(f"main_url: {main_url}")
-
         main_filename = urllib.parse.urlparse(main_url).path.split('/')[-1]
         # If the main url is a zip file, we never need to download additional files
         if main_filename.endswith('.zip'):
@@ -564,7 +562,6 @@ class IcosaApi:
 
         main_resource_path = None
 
-        print(f"all_urls: {all_urls}")
         for url in all_urls:
             resource_filename = urllib.parse.urlparse(url).path.split('/')[-1]
 
@@ -596,27 +593,26 @@ class IcosaApi:
                 #             wm.progress_update(done)
                 #             set_log("Downloading model..{}%".format(done))
                 # wm.progress_end()
-
             else:
-
                 print('Model already downloaded')
 
-        gltf_path = None
+        model_path = None
         if main_filename.endswith('.zip'):
             extract_path = unzip_archive(resource_path)
             # Get the first gltf file in the extracted directory
             # TODO Handle scenario where there are zero or multiple gltf files
             gltf_files = glob.glob(os.path.join(extract_path, '*.gltf'))
+            obj_files = glob.glob(os.path.join(extract_path, '*.obj'))
             if gltf_files:
-                gltf_path = gltf_files[0]
+                model_path = gltf_files[0]
+            elif obj_files:
+                model_path = obj_files[0]
         else:
-            gltf_path = main_resource_path
-        print(f"gltf_path: {gltf_path}")
-        print(f"main_resource_path: {main_resource_path}")
+            model_path = main_resource_path
 
-        if gltf_path:
+        if model_path:
             try:
-                import_model(gltf_path, asset_id, title)
+                import_model(model_path, asset_id, title)
             except Exception as e:
                 import traceback
                 print(traceback.format_exc())
@@ -1175,8 +1171,8 @@ def swap_materials_from_library(imported_objects, asset_id):
         traceback.print_exc()
 
 
-def import_model(gltf_path, asset_id, title):
-    bpy.ops.wm.import_modal('INVOKE_DEFAULT', gltf_path=gltf_path, asset_id=asset_id, title=title)
+def import_model(model_path, asset_id, title):
+    bpy.ops.wm.import_modal('INVOKE_DEFAULT', model_path=model_path, asset_id=asset_id, title=title)
 
 
 def build_search_request(query, curated, include_tiltbrush, face_count, category, sort_by):
@@ -1433,10 +1429,10 @@ class LoginModal(bpy.types.Operator):
 class ImportModalOperator(bpy.types.Operator):
     """Imports the selected model into Blender"""
     bl_idname = "wm.import_modal"
-    bl_label = "Import glTF model to Icosa Gallery"
+    bl_label = "Import 3d model to Icosa Gallery"
     bl_options = {'INTERNAL'}
 
-    gltf_path: StringProperty()
+    model_path: StringProperty()
     asset_id: StringProperty()
     title: StringProperty()
 
@@ -1453,32 +1449,45 @@ class ImportModalOperator(bpy.types.Operator):
             # Blender doesn't support uv channels with 3 or 4 components
             # Legacy Tilt files from Poly are using 3 or 4 components for uv channels
             # If we prepend "_" to those channels, Blender will treat them as custom channels
-            with open(self.gltf_path, 'r') as f:
-                gltf_json = json.load(f)
-            if "GOOGLE_tilt_brush_techniques" in gltf_json["extensions"]:
-                for mesh in gltf_json["meshes"]:
-                    for primitive in mesh["primitives"]:
-                        # Rename the key "TEX_COORD_0" to "_TEXCOORD_0"
-                        if "TEXCOORD_0" in primitive["attributes"]:
-                            primitive["attributes"]["_TEXCOORD_0"] = primitive["attributes"].pop("TEXCOORD_0")
-                        if "TEXCOORD_0" in primitive["attributes"]:
-                            primitive["attributes"]["_TEXCOORD_1"] = primitive["attributes"].pop("TEXCOORD_0")
+            is_gltf = self.model_path.lower().endswith('.gltf') or self.model_path.lower().endswith('.glb')
+            if is_gltf:
+                with open(self.model_path, 'r') as f:
+                    asset_json = json.load(f)
+                if "GOOGLE_tilt_brush_techniques" in asset_json["extensions"]:
+                    for mesh in asset_json["meshes"]:
+                        for primitive in mesh["primitives"]:
+                            # Rename the key "TEX_COORD_0" to "_TEXCOORD_0"
+                            if "TEXCOORD_0" in primitive["attributes"]:
+                                primitive["attributes"]["_TEXCOORD_0"] = primitive["attributes"].pop("TEXCOORD_0")
+                            if "TEXCOORD_0" in primitive["attributes"]:
+                                primitive["attributes"]["_TEXCOORD_1"] = primitive["attributes"].pop("TEXCOORD_0")
 
-                with open(self.gltf_path, 'w') as f:
-                    json.dump(gltf_json, f, indent=4)
+                    with open(self.model_path, 'w') as f:
+                        json.dump(asset_json, f, indent=4)
+                # Import the model
+                bpy.ops.import_scene.gltf(filepath=self.model_path)
+                imported_objects = [o for o in bpy.data.objects if o.name not in old_objects]
+                # Swap materials from library if configured
+                swap_materials_from_library(imported_objects, self.asset_id)
+                set_import_status('')
+                Utils.clean_downloaded_model_dir(self.asset_id)
+                Utils.clean_node_hierarchy(imported_objects, self.title)
+            else:
+                bpy.ops.wm.obj_import(filepath=self.model_path, use_split_groups=True)
+                imported_objects = [o for o in bpy.data.objects if o.name not in old_objects]
 
-            bpy.ops.import_scene.gltf(filepath=self.gltf_path)
+                # Create a parent EMPTY object for all the split groups
+                parent_empty = bpy.data.objects.new(self.title, None)
+                bpy.context.collection.objects.link(parent_empty)
+                for obj in imported_objects:
+                    obj.parent = parent_empty
 
-            # Get the newly imported objects
-            imported_objects = [o for o in bpy.data.objects if o.name not in old_objects]
+                set_import_status('')
+                Utils.clean_downloaded_model_dir(self.asset_id)
+                Utils.clean_node_hierarchy([parent_empty] + imported_objects, self.title)
 
-            # Swap materials from library if configured
-            swap_materials_from_library(imported_objects, self.asset_id)
-
-            set_import_status('')
-            Utils.clean_downloaded_model_dir(self.asset_id)
-            Utils.clean_node_hierarchy(imported_objects, self.title)
             return {'FINISHED'}
+
         except Exception:
             import traceback
             print(traceback.format_exc())
@@ -1789,19 +1798,41 @@ class IcosaModel:
         self.resource_urls = []
         self.thumbnail_path = os.path.join(Config.ICOSA_THUMB_DIR, '{}.png'.format(self.asset_id))
 
-        for f in json_data["formats"]:
+        is_blocks = False
+        for fmt in json_data["formats"]:
+            if fmt["formatType"] == "BLOCKS":
+                is_blocks = True
+
+        def is_gltf(f) -> bool:
+            return f["formatType"] == "GLB" or f["formatType"] == "GLTF2"
+        def is_obj(f) -> bool:
+            return f["formatType"] == "OBJ" or f["formatType"] == "OBJ_NGON"
+
+        valid_formats = []
+        for fmt in json_data["formats"]:
             # TODO Allow selecting the format by role or "preferred" type
-            if f["formatType"] == "GLB" or f["formatType"] == "GLTF2":
-                print(f"Found GLTF/GLB with role: {f['role']}")
-                if "zip_archive_url" in f:
-                    # TODO Remove this kludge after https://github.com/icosa-foundation/icosa-gallery/issues/164 is resolved
-                    if f["zip_archive_url"].startswith("https://poly.googleusercontent.com"):
-                        f["zip_archive_url"] = "https://web.archive.org/web/" + f["zip_archive_url"]
-                    self.zip_archive_url = f["zip_archive_url"]
-                self.download_url = f["root"]["url"]
-                if "resources" in f:
-                    for resource in f["resources"]:
-                        self.resource_urls.append(resource["url"])
+            # Hacky logic because Blocks gltfs don't have a proper mesh hierarchy
+            if (is_blocks and is_obj(fmt)) or (not is_blocks and is_gltf(fmt)):
+                valid_formats.append(fmt)
+        # Now pick the best format available based on role
+        best_format = valid_formats[0]
+        for fmt in valid_formats:
+            if is_blocks: # Prefer non-trianglulated obj
+                if fmt["formatType"] == "OBJ_NGON":
+                    best_format = fmt
+                    break
+
+        if "zip_archive_url" in best_format:
+            # TODO Remove this kludge after https://github.com/icosa-foundation/icosa-gallery/issues/164 is resolved
+            if best_format["zip_archive_url"].startswith("https://poly.googleusercontent.com"):
+                best_format["zip_archive_url"] = "https://web.archive.org/web/" + best_format["zip_archive_url"]
+            self.zip_archive_url = best_format["zip_archive_url"]
+        self.download_url = best_format["root"]["url"]
+        if "resources" in best_format:
+            for resource in best_format["resources"]:
+                self.resource_urls.append(resource["url"])
+
+
 
         # TODO: Get download size
         self.download_size = None
@@ -2051,7 +2082,6 @@ del _IcosaState
 
 # remove file copy
 def terminate(filepath):
-    print(filepath)
     tempdir = os.path.dirname(filepath)
     if os.path.exists(tempdir):
         shutil.rmtree(tempdir)
@@ -2080,7 +2110,7 @@ def upload_as_multipart(filepath, filename):
 
     # Upload and parse the result
     try:
-        print("Uploading to %s" % uploadUrl)
+
         r = requestFunction(
             uploadUrl,
             files=form,
