@@ -65,6 +65,32 @@ ongoingSearches = set([])
 is_plugin_enabled = False
 
 
+# --- Helpers to resolve addon id under Blender Extensions ---
+def _addon_key():
+    # In extensions, __package__/__name__ can be like 'bl_ext.icosa_gallery_addon'
+    # Preferences expect the plain addon id: 'icosa_gallery_addon'
+    pkg = __package__ or __name__
+    return pkg.split('.')[-1]
+
+
+def _get_addon_preferences():
+    try:
+        addons = bpy.context.preferences.addons
+    except Exception:
+        return None
+    key = _addon_key()
+    pref_wrap = addons.get(key)
+    if pref_wrap is not None:
+        return pref_wrap.preferences
+    # Fallback: search by suffix match (defensive)
+    try:
+        for k, v in addons.items():
+            if str(k).endswith(key):
+                return v.preferences
+    except Exception:
+        pass
+    return None
+
 class Config:
 
     ADDON_NAME = 'io_icosa_gallery'
@@ -498,7 +524,7 @@ class IcosaApi:
 
     def write_model_info(self, title, author, author_url, _license, asset_id):
         try:
-            downloadHistory = bpy.context.preferences.addons[__name__.split('.')[0]].preferences.downloadHistory
+            downloadHistory = getattr(_get_addon_preferences(), 'downloadHistory', "")
             if downloadHistory != "":
                 downloadHistory = os.path.abspath(downloadHistory)
                 createFile = False
@@ -1009,11 +1035,12 @@ def get_material_library_path():
         Path to material library .blend file, or None if not found
     """
     # Get preferences
-    preferences = bpy.context.preferences.addons[__name__.split('.')[0]].preferences
+    preferences = _get_addon_preferences()
 
     # Check if user has specified a custom library path
-    if preferences.materialLibraryPath and os.path.exists(preferences.materialLibraryPath):
-        return preferences.materialLibraryPath
+    _mlp = getattr(preferences, 'materialLibraryPath', None)
+    if _mlp and os.path.exists(_mlp):
+        return _mlp
 
     # Check for default bundled library file
     addon_dir = os.path.dirname(os.path.realpath(__file__))
@@ -1042,8 +1069,8 @@ def swap_materials_from_library(imported_objects, asset_id):
             return
 
         # Get suffix pattern from preferences
-        preferences = bpy.context.preferences.addons[__name__.split('.')[0]].preferences
-        suffix_pattern = preferences.materialSuffixPattern
+        preferences = _get_addon_preferences()
+        suffix_pattern = getattr(preferences, 'materialSuffixPattern', "")
 
         print(f"Using material library: {library_path}")
 
@@ -2252,24 +2279,29 @@ class ExportIcosa(bpy.types.Operator):
 
 def get_temporary_path():
 
-    # Get the preferences cache directory
-    cachePath = bpy.context.preferences.addons[__name__.split('.')[0]].preferences.cachePath
+    # Try preferences cache directory first (if available)
+    prefs = _get_addon_preferences()
+    cachePath = None
+    if prefs is not None:
+        try:
+            cachePath = getattr(prefs, 'cachePath', None)
+        except Exception:
+            cachePath = None
 
-    # The cachePath was set in the preferences
     if cachePath:
         return cachePath
-    else:
-        # Rely on Blender temporary directory
+
+    # Rely on Blender temporary directory
+    try:
         if bpy.app.version == (2, 79, 0):
-            if bpy.context.user_preferences.filepaths.temporary_directory:
-                return bpy.context.user_preferences.filepaths.temporary_directory
-            else:
-                return tempfile.mkdtemp()
+            td = getattr(bpy.context.user_preferences.filepaths, 'temporary_directory', '')
+            return td or tempfile.mkdtemp()
         else:
-            if bpy.context.preferences.filepaths.temporary_directory:
-                return bpy.context.preferences.filepaths.temporary_directory
-            else:
-                return tempfile.mkdtemp()
+            td = getattr(bpy.context.preferences.filepaths, 'temporary_directory', '')
+            return td or (getattr(bpy.app, 'tempdir', None) or tempfile.mkdtemp())
+    except Exception:
+        # As a last resort
+        return tempfile.mkdtemp()
 
 def updateCacheDirectory(self, context):
 
@@ -2290,7 +2322,7 @@ def updateCacheDirectory(self, context):
     if not os.path.exists(Config.ICOSA_MODEL_DIR): os.makedirs(Config.ICOSA_MODEL_DIR)
 
 class IcosaAddonPreferences(bpy.types.AddonPreferences):
-    bl_idname = __name__
+    bl_idname = _addon_key()
     cachePath: StringProperty(
         name="Cache folder",
         description=(
