@@ -2,6 +2,8 @@
 
 **Directly import and export models from and to Icosa Gallery in Blender**
 
+![main.png](docs/images/main.png)
+
 * [Installation](#installation)
 * [Login](#login)
 * [Import from Icosa Gallery](#import-a-model-from-icosa-gallery)
