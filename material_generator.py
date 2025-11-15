@@ -1,0 +1,364 @@
+"""
+Dynamic Blender material generator for Open Brush brushes
+Uses metadata from three-icosa to create Blender materials procedurally
+"""
+
+import bpy
+from .brush_metadata import BRUSH_MATERIALS
+
+
+# Three.js blend mode constants mapped to Blender
+BLEND_MODE_MAP = {
+    0: 'OPAQUE',      # NoBlending
+    1: 'BLEND',       # NormalBlending
+    2: 'BLEND',       # AdditiveBlending (we'll set blend mode to Add)
+    3: 'BLEND',       # SubtractiveBlending
+    4: 'BLEND',       # MultiplyBlending
+    5: 'BLEND',       # CustomBlending
+}
+
+# Three.js side constants
+SIDE_MAP = {
+    0: False,  # FrontSide - backface culling ON
+    1: False,  # BackSide - backface culling ON (render back only)
+    2: True,   # DoubleSide - backface culling OFF
+}
+
+
+def get_brush_metadata(brush_name):
+    """
+    Get metadata for a brush by name
+
+    Args:
+        brush_name: Name of the brush (with or without 'ob-' prefix)
+
+    Returns:
+        Dictionary of brush metadata or None
+    """
+    # Try exact match first
+    if brush_name in BRUSH_MATERIALS:
+        return BRUSH_MATERIALS[brush_name]
+
+    # Try with 'ob-' prefix removed
+    if brush_name.startswith('ob-'):
+        name_without_prefix = brush_name[3:]
+        if name_without_prefix in BRUSH_MATERIALS:
+            return BRUSH_MATERIALS[name_without_prefix]
+
+    # Try adding 'ob-' prefix
+    prefixed_name = f'ob-{brush_name}'
+    if prefixed_name in BRUSH_MATERIALS:
+        return BRUSH_MATERIALS[prefixed_name]
+
+    # Try case-insensitive match
+    brush_name_lower = brush_name.lower()
+    for key in BRUSH_MATERIALS:
+        if key.lower() == brush_name_lower:
+            return BRUSH_MATERIALS[key]
+
+    return None
+
+
+def create_material_from_metadata(brush_name, metadata=None):
+    """
+    Create a Blender material from Open Brush metadata
+
+    Args:
+        brush_name: Name for the material
+        metadata: Brush metadata dictionary (if None, will look up by brush_name)
+
+    Returns:
+        Created Blender material or None
+    """
+    if metadata is None:
+        metadata = get_brush_metadata(brush_name)
+
+    if not metadata:
+        print(f"No metadata found for brush: {brush_name}")
+        return None
+
+    # Create material
+    mat_name = brush_name if not brush_name.startswith('ob-') else brush_name
+    mat = bpy.data.materials.new(name=mat_name)
+    mat.use_nodes = True
+
+    # Clear default nodes
+    nodes = mat.node_tree.nodes
+    nodes.clear()
+
+    # Create shader nodes
+    output_node = nodes.new(type='ShaderNodeOutputMaterial')
+    output_node.location = (300, 0)
+
+    # Determine shader type based on metadata
+    shader_node = create_shader_node(mat, metadata, nodes)
+    shader_node.location = (0, 0)
+
+    # Link shader to output
+    links = mat.node_tree.links
+    links.new(shader_node.outputs[0], output_node.inputs[0])
+
+    # Apply material properties
+    apply_material_properties(mat, metadata)
+
+    # Setup textures if present
+    setup_textures(mat, metadata, nodes, shader_node)
+
+    print(f"Created material: {mat_name}")
+    return mat
+
+
+def create_shader_node(mat, metadata, nodes):
+    """
+    Create appropriate shader node based on metadata
+
+    Args:
+        mat: Blender material
+        metadata: Brush metadata
+        nodes: Material node tree nodes
+
+    Returns:
+        Created shader node
+    """
+    uniforms = metadata.get('uniforms', {})
+    blending = metadata.get('blending', 0)
+    transparent = metadata.get('transparent', False)
+
+    # Most Open Brush materials use Principled BSDF as a base
+    shader = nodes.new(type='ShaderNodeBsdfPrincipled')
+
+    # Apply color from uniforms if available
+    # Note: Open Brush applies color per-vertex, so base color is usually white
+    if 'u_Color' in uniforms:
+        color = uniforms['u_Color']
+        if len(color) >= 3:
+            shader.inputs['Base Color'].default_value = (color[0], color[1], color[2], 1.0)
+
+    # Apply specular/shininess
+    if 'u_Shininess' in uniforms:
+        shininess = uniforms['u_Shininess']
+        # Map shininess (0-1) to roughness (inverse)
+        roughness = 1.0 - min(1.0, max(0.0, shininess))
+        shader.inputs['Roughness'].default_value = roughness
+
+    if 'u_SpecColor' in uniforms:
+        # Three.js SpecColor doesn't directly map to Principled BSDF
+        # We can use it to influence the specular tint
+        pass  # Principled BSDF handles this differently
+
+    # Handle emission for glowing brushes
+    if 'u_EmissionGain' in uniforms:
+        emission_gain = uniforms['u_EmissionGain']
+        if emission_gain > 0:
+            shader.inputs['Emission Strength'].default_value = emission_gain
+            # Set emission color to base color
+            if 'Base Color' in shader.inputs:
+                base_color = shader.inputs['Base Color'].default_value
+                shader.inputs['Emission Color'].default_value = base_color
+
+    # Handle transparency
+    if transparent or blending == 2:  # Additive blending
+        shader.inputs['Alpha'].default_value = 0.5  # Default, will be overridden by texture
+
+    return shader
+
+
+def apply_material_properties(mat, metadata):
+    """
+    Apply material-level properties (blend mode, transparency, etc.)
+
+    Args:
+        mat: Blender material
+        metadata: Brush metadata
+    """
+    blending = metadata.get('blending', 0)
+    transparent = metadata.get('transparent', False)
+    side = metadata.get('side', 2)
+    depth_write = metadata.get('depthWrite', True)
+
+    # Set blend mode
+    if transparent or blending > 0:
+        mat.blend_method = 'BLEND'
+
+        # Special handling for additive blending
+        if blending == 2:
+            # Additive blending in Blender
+            mat.blend_method = 'BLEND'
+            # Note: True additive would need compositor or EEVEE settings
+            # For Cycles, we can approximate with emission
+    else:
+        mat.blend_method = 'OPAQUE'
+
+    # Handle alpha clipping
+    if 'u_Cutoff' in metadata.get('uniforms', {}):
+        cutoff = metadata['uniforms']['u_Cutoff']
+        if cutoff > 0:
+            mat.blend_method = 'CLIP'
+            mat.alpha_threshold = cutoff
+
+    # Set backface culling
+    mat.use_backface_culling = not SIDE_MAP.get(side, True)
+
+    # Depth write (Blender doesn't expose this directly in materials)
+    # This would need to be handled at render settings level
+    if not depth_write:
+        mat.show_transparent_back = False
+
+
+def setup_textures(mat, metadata, nodes, shader_node):
+    """
+    Setup texture nodes based on metadata uniforms
+
+    Args:
+        mat: Blender material
+        metadata: Brush metadata
+        nodes: Material node tree nodes
+        shader_node: Main shader node to connect textures to
+    """
+    uniforms = metadata.get('uniforms', {})
+    links = mat.node_tree.links
+
+    texture_offset_x = -400
+    texture_offset_y = 0
+
+    # Main texture (diffuse/albedo)
+    if 'u_MainTex' in uniforms:
+        tex_path = uniforms['u_MainTex']
+        if tex_path and tex_path != 'None':
+            tex_node = create_texture_node(nodes, tex_path, texture_offset_x, texture_offset_y)
+            if tex_node:
+                # Connect to base color
+                links.new(tex_node.outputs['Color'], shader_node.inputs['Base Color'])
+                # Connect alpha if material is transparent
+                if metadata.get('transparent', False):
+                    links.new(tex_node.outputs['Alpha'], shader_node.inputs['Alpha'])
+                texture_offset_y -= 300
+
+    # Bump map (normal map)
+    if 'u_BumpMap' in uniforms:
+        tex_path = uniforms['u_BumpMap']
+        if tex_path and tex_path != 'None':
+            tex_node = create_texture_node(nodes, tex_path, texture_offset_x, texture_offset_y)
+            if tex_node:
+                # Create normal map node
+                normal_node = nodes.new(type='ShaderNodeNormalMap')
+                normal_node.location = (texture_offset_x + 200, texture_offset_y)
+                links.new(tex_node.outputs['Color'], normal_node.inputs['Color'])
+                links.new(normal_node.outputs['Normal'], shader_node.inputs['Normal'])
+                texture_offset_y -= 300
+
+    # Alpha mask
+    if 'u_AlphaMask' in uniforms:
+        tex_path = uniforms['u_AlphaMask']
+        if tex_path and tex_path != 'None':
+            tex_node = create_texture_node(nodes, tex_path, texture_offset_x, texture_offset_y)
+            if tex_node:
+                links.new(tex_node.outputs['Color'], shader_node.inputs['Alpha'])
+                texture_offset_y -= 300
+
+    # Specular texture
+    if 'u_SpecTex' in uniforms:
+        tex_path = uniforms['u_SpecTex']
+        if tex_path and tex_path != 'None':
+            tex_node = create_texture_node(nodes, tex_path, texture_offset_x, texture_offset_y)
+            if tex_node:
+                # Use as roughness map (inverted)
+                invert_node = nodes.new(type='ShaderNodeInvert')
+                invert_node.location = (texture_offset_x + 200, texture_offset_y)
+                links.new(tex_node.outputs['Color'], invert_node.inputs['Color'])
+                links.new(invert_node.outputs['Color'], shader_node.inputs['Roughness'])
+                texture_offset_y -= 300
+
+
+def create_texture_node(nodes, texture_path, x, y):
+    """
+    Create an image texture node
+
+    Args:
+        nodes: Material node tree nodes
+        texture_path: Path to texture (relative to three-icosa brushes directory)
+        x, y: Node location
+
+    Returns:
+        Created texture node or None
+    """
+    # Note: texture_path is relative to three-icosa brushes directory
+    # Format: "BrushName-GUID/BrushName-GUID-v10.0-MainTex.png"
+    # We can't load these directly without downloading them first
+    # For now, create the node but leave it without an image
+
+    tex_node = nodes.new(type='ShaderNodeTexImage')
+    tex_node.location = (x, y)
+    tex_node.label = f"Texture: {texture_path}"
+
+    # TODO: Could implement texture downloading from three-icosa GitHub
+    # For now, just create placeholder node
+
+    return tex_node
+
+
+def generate_material_for_brush(brush_name):
+    """
+    High-level function to generate a material for a brush
+
+    Args:
+        brush_name: Name of the brush (e.g., 'BlocksBasic', 'ob-Ink', etc.)
+
+    Returns:
+        Created Blender material or None
+    """
+    # Remove 'ob-' prefix if present for metadata lookup
+    lookup_name = brush_name[3:] if brush_name.startswith('ob-') else brush_name
+
+    metadata = get_brush_metadata(lookup_name)
+    if not metadata:
+        print(f"Cannot generate material: No metadata for '{brush_name}'")
+        return None
+
+    # Check if material already exists
+    existing = bpy.data.materials.get(brush_name)
+    if existing:
+        print(f"Material '{brush_name}' already exists, skipping generation")
+        return existing
+
+    return create_material_from_metadata(brush_name, metadata)
+
+
+def list_available_brushes():
+    """
+    Get list of all brushes with metadata
+
+    Returns:
+        List of brush names
+    """
+    return list(BRUSH_MATERIALS.keys())
+
+
+def get_brush_info(brush_name):
+    """
+    Get human-readable info about a brush
+
+    Args:
+        brush_name: Name of the brush
+
+    Returns:
+        Dictionary with brush info
+    """
+    metadata = get_brush_metadata(brush_name)
+    if not metadata:
+        return None
+
+    info = {
+        'name': brush_name,
+        'transparent': metadata.get('transparent', False),
+        'blend_mode': BLEND_MODE_MAP.get(metadata.get('blending', 0), 'UNKNOWN'),
+        'double_sided': SIDE_MAP.get(metadata.get('side', 2), True),
+        'has_main_texture': 'u_MainTex' in metadata.get('uniforms', {}),
+        'has_normal_map': 'u_BumpMap' in metadata.get('uniforms', {}),
+        'shader_files': {
+            'vertex': metadata.get('vertexShader', ''),
+            'fragment': metadata.get('fragmentShader', '')
+        }
+    }
+
+    return info

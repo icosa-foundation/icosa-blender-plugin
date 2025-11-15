@@ -39,6 +39,12 @@ from bpy.props import (StringProperty,
                        IntProperty,
                        PointerProperty)
 
+# Import material generator for dynamic material creation
+try:
+    from . import material_generator
+except ImportError:
+    material_generator = None
+
 bl_info = {
     'name': 'Icosa Gallery Addon',
     'description': 'Browse, download from and publish to the Icosa 3D models Gallery',
@@ -1052,25 +1058,50 @@ def get_material_library_path():
     return None
 
 
+def generate_or_find_material(material_name, preferences):
+    """
+    Generate a material dynamically or find it in the library
+
+    Args:
+        material_name: Name of the material to create/find
+        preferences: Addon preferences
+
+    Returns:
+        Blender material or None
+    """
+    use_dynamic = getattr(preferences, 'useDynamicMaterials', False)
+
+    if use_dynamic and material_generator:
+        # Try dynamic generation first
+        print(f"Attempting dynamic generation for: {material_name}")
+        mat = material_generator.generate_material_for_brush(material_name)
+        if mat:
+            return mat
+
+    return None
+
+
 def swap_materials_from_library(imported_objects, asset_id):
     """
     Swap materials from imported GLTF with materials from library .blend file
+    or generate them dynamically
 
     Args:
         imported_objects: List of newly imported objects
         asset_id: Asset ID of the imported model
     """
     try:
+        # Get preferences
+        preferences = _get_addon_preferences()
+        use_dynamic = getattr(preferences, 'useDynamicMaterials', False)
+        suffix_pattern = getattr(preferences, 'materialSuffixPattern', "")
+
         # Get material library path (checks for default bundled file)
         library_path = get_material_library_path()
 
-        if not library_path:
-            print("Material library not configured or not found")
+        if not library_path and not (use_dynamic and material_generator):
+            print("Material library not configured and dynamic generation unavailable")
             return
-
-        # Get suffix pattern from preferences
-        preferences = _get_addon_preferences()
-        suffix_pattern = getattr(preferences, 'materialSuffixPattern', "")
 
         print(f"Using material library: {library_path}")
 
@@ -1092,11 +1123,46 @@ def swap_materials_from_library(imported_objects, asset_id):
             print("No materials found on imported objects")
             return
 
+        # If using dynamic materials exclusively, skip library loading
+        if use_dynamic and material_generator:
+            print("Using dynamic material generation")
+            swapped_count = 0
+            for imported_mat_name in imported_materials:
+                converted_name = convert_material_name(imported_mat_name, suffix_pattern)
+
+                # Try to generate material dynamically
+                generated_mat = material_generator.generate_material_for_brush(converted_name)
+
+                if generated_mat:
+                    # Get the imported material we're replacing
+                    imported_mat = bpy.data.materials.get(imported_mat_name)
+
+                    # Replace material on all objects that use it
+                    if imported_mat_name in material_to_objects:
+                        for obj, mat_slot in material_to_objects[imported_mat_name]:
+                            mat_slot.material = generated_mat
+                            swapped_count += 1
+
+                        # Remove the old imported material if it's no longer in use
+                        if imported_mat and imported_mat.users == 0:
+                            bpy.data.materials.remove(imported_mat)
+
+                        print(f"Dynamically generated material: {imported_mat_name} -> {generated_mat.name}")
+                else:
+                    print(f"Could not generate material for: {imported_mat_name}")
+
+            if swapped_count > 0:
+                set_import_status(f'Generated {swapped_count} materials dynamically')
+                print(f"Dynamic material generation complete: {swapped_count} material slots updated")
+            return
+
         # Get list of existing materials before append (to track what gets added)
         existing_materials = set(bpy.data.materials[:])
 
         # Load materials from library blend file
         materials_to_append = {}  # Maps: imported_mat_name -> library_mat_name_to_append
+        materials_to_generate = []  # Materials not found in library
+
         with bpy.data.libraries.load(library_path, link=False) as (data_from, data_to):
             # Get all available material names
             available_materials = data_from.materials
@@ -1138,6 +1204,9 @@ def swap_materials_from_library(imported_objects, asset_id):
                     materials_to_append[imported_mat_name] = matched_material
                 else:
                     print(f"No match found in library for material: {imported_mat_name}")
+                    # Add to list for dynamic generation if available
+                    if material_generator:
+                        materials_to_generate.append((imported_mat_name, converted_name))
 
             # Append only the materials we need (don't rely on names after this)
             data_to.materials = [materials_to_append[name] for name in materials_to_append]
@@ -1186,11 +1255,41 @@ def swap_materials_from_library(imported_objects, asset_id):
 
                 print(f"Swapped material: {imported_mat_name} -> {library_mat.name}")
 
-        if swapped_count > 0:
-            set_import_status(f'Swapped {swapped_count} materials from library')
-            print(f"Material swap complete: {swapped_count} material slots updated")
+        # Handle materials not found in library with dynamic generation
+        generated_count = 0
+        if materials_to_generate and material_generator:
+            print(f"\nAttempting dynamic generation for {len(materials_to_generate)} materials not found in library...")
+            for imported_mat_name, converted_name in materials_to_generate:
+                generated_mat = material_generator.generate_material_for_brush(converted_name)
+
+                if generated_mat:
+                    # Get the imported material we're replacing
+                    imported_mat = bpy.data.materials.get(imported_mat_name)
+
+                    # Replace material on all objects that use it
+                    if imported_mat_name in material_to_objects:
+                        for obj, mat_slot in material_to_objects[imported_mat_name]:
+                            mat_slot.material = generated_mat
+                            generated_count += 1
+
+                        # Remove the old imported material if it's no longer in use
+                        if imported_mat and imported_mat.users == 0:
+                            bpy.data.materials.remove(imported_mat)
+
+                        print(f"Dynamically generated material: {imported_mat_name} -> {generated_mat.name}")
+
+        # Report results
+        total_processed = swapped_count + generated_count
+        if total_processed > 0:
+            status_parts = []
+            if swapped_count > 0:
+                status_parts.append(f"{swapped_count} from library")
+            if generated_count > 0:
+                status_parts.append(f"{generated_count} generated")
+            set_import_status(f'Materials: {", ".join(status_parts)}')
+            print(f"Material processing complete: {swapped_count} swapped, {generated_count} generated")
         else:
-            print("No materials were swapped (no matches found in library)")
+            print("No materials were processed")
 
     except Exception as e:
         print(f"Error swapping materials: {e}")
@@ -2359,6 +2458,14 @@ class IcosaAddonPreferences(bpy.types.AddonPreferences):
         ),
         default=""
     )
+    useDynamicMaterials: BoolProperty(
+        name="Generate materials dynamically",
+        description=(
+            "Generate Blender materials from Open Brush metadata instead of using the bundled library.\n"
+            "If disabled, falls back to dynamic generation when library materials are not found"
+        ),
+        default=False
+    )
     def draw(self, context):
         layout = self.layout
         layout.prop(self, "cachePath", text="Download directory")
@@ -2384,6 +2491,14 @@ class IcosaAddonPreferences(bpy.types.AddonPreferences):
 
         layout.prop(self, "materialLibraryPath", text="Custom library (.blend)")
         layout.prop(self, "materialSuffixPattern", text="Suffix to remove")
+        layout.separator()
+        layout.prop(self, "useDynamicMaterials", text="Generate materials dynamically")
+        if material_generator:
+            box = layout.box()
+            box.label(text=f"{len(material_generator.list_available_brushes())} brushes available for generation", icon='INFO')
+        else:
+            box = layout.box()
+            box.label(text="Dynamic material generation unavailable", icon='ERROR')
 
 classes = (
     IcosaAddonPreferences,
