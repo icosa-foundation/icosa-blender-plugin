@@ -121,6 +121,10 @@ class Config:
     BASE_SEARCH_OWN_MODELS = f'{ICOSA_ME}/assets?'
     BASE_SEARCH_LIKED_MODELS = f'{ICOSA_ME}/likedassets?license=REMIXABLE&'
     BASE_SEARCH = f'{ICOSA_API}/assets?license=REMIXABLE'
+
+    # Collections endpoints
+    BASE_COLLECTIONS = f'{ICOSA_API}/collections'
+    BASE_COLLECTIONS_OWN = f'{ICOSA_ME}/collections'
     # TODO remove the need for default search
     # Instead construct it from the initial UI values
     DEFAULT_SEARCH = f'{BASE_SEARCH}&orderBy=BEST&format=-TILT'
@@ -179,7 +183,9 @@ class Config:
     ICOSA_SEARCH_DOMAIN = (
         ('DEFAULT', "Whole site", "", 0),
         ('OWN', "Your Models", "", 1),
-        ('LIKED', "Your Likes", "", 2)
+        ('LIKED', "Your Likes", "", 2),
+        ('COLLECTIONS', "All Collections", "", 3),
+        ('OWN_COLLECTIONS', "Your Collections", "", 4)
     )
 
     MAX_THUMBNAIL_HEIGHT = 256
@@ -516,6 +522,10 @@ class IcosaApi:
             url = Config.BASE_SEARCH_OWN_MODELS
         elif icosa_props.search_domain == "LIKED":
             url = Config.BASE_SEARCH_LIKED_MODELS
+        elif icosa_props.search_domain == "COLLECTIONS":
+            url = Config.BASE_COLLECTIONS + '?'
+        elif icosa_props.search_domain == "OWN_COLLECTIONS":
+            url = Config.BASE_COLLECTIONS_OWN + '?'
         else:
             url = Config.BASE_SEARCH
 
@@ -527,6 +537,21 @@ class IcosaApi:
 
     def search_cursor(self, url, search_cb):
         requests_get(url, headers=self.headers, hooks={'response': search_cb})
+
+    def browse_collection(self, collection_id, search_cb):
+        """Browse assets within a specific collection"""
+        icosa_props = get_icosa_props()
+
+        # Determine which collection endpoint to use based on current search domain
+        if icosa_props.search_domain == "OWN_COLLECTIONS":
+            url = f"{Config.BASE_COLLECTIONS_OWN}/{collection_id}"
+        else:
+            url = f"{Config.BASE_COLLECTIONS}/{collection_id}"
+
+        if url not in ongoingSearches:
+            ongoingSearches.add(url)
+            searchthr = GetRequestThread(url, search_cb, self.headers)
+            searchthr.start()
 
     def write_model_info(self, title, author, author_url, _license, asset_id):
         try:
@@ -878,6 +903,23 @@ class IcosaBrowserProps(bpy.types.PropertyGroup):
             maxlen=1024,
             options={'TEXTEDIT_UPDATE'})
 
+    # Collection browsing state
+    browsing_collection: BoolProperty(
+        name="Browsing Collection",
+        description="Whether currently viewing assets within a collection",
+        default=False
+    )
+    current_collection_id: StringProperty(
+        name="Current Collection",
+        description="ID of the collection currently being viewed",
+        default=""
+    )
+    current_collection_name: StringProperty(
+        name="Collection Name",
+        description="Name of the collection currently being viewed",
+        default=""
+    )
+
 
 def list_current_results(self, context):
     icosa_props = get_icosa_props()
@@ -895,12 +937,23 @@ def list_current_results(self, context):
         icosa_results = icosa_props.search_results['current']
         for i, result in enumerate(icosa_results):
             if result in icosa_results:
-                model = icosa_results[result]
-                if model.asset_id in icosa_props.custom_icons:
-                    res.append((model.asset_id, model.title, "", icosa_props.custom_icons[model.asset_id].icon_id, i))
+                item = icosa_results[result]
+                # Handle both IcosaModel and IcosaCollection
+                if isinstance(item, IcosaCollection):
+                    # It's a collection
+                    icon_key = f"collection_{item.collection_id}"
+                    if icon_key in icosa_props.custom_icons:
+                        res.append((item.collection_id, item.name, "", icosa_props.custom_icons[icon_key].icon_id, i))
+                    else:
+                        res.append((item.collection_id, item.name, "", preview_collection['icosa_icon']['0'].icon_id, i))
+                        missing_thumbnail = True
                 else:
-                    res.append((model.asset_id, model.title, "", preview_collection['icosa_icon']['0'].icon_id, i))
-                    missing_thumbnail = True
+                    # It's a model
+                    if item.asset_id in icosa_props.custom_icons:
+                        res.append((item.asset_id, item.title, "", icosa_props.custom_icons[item.asset_id].icon_id, i))
+                    else:
+                        res.append((item.asset_id, item.title, "", preview_collection['icosa_icon']['0'].icon_id, i))
+                        missing_thumbnail = True
             else:
                 print('Result issue')
 
@@ -913,13 +966,29 @@ def list_current_results(self, context):
     return preview_collection['thumbnails']
 
 
+def draw_collection_info(layout, collection, context):
+    ui_collection_props = layout.box().column(align=True)
+
+    row = ui_collection_props.row()
+    row.label(text="{}".format(collection.name), icon='OUTLINER_COLLECTION')
+
+    if collection.description:
+        ui_collection_props.label(text='{}'.format(collection.description), icon='TEXT')
+
+    # Browse button
+    browse_button = ui_collection_props.row()
+    browse_button.operator("wm.icosa_browse_collection", text="Browse Collection", icon='RIGHTARROW').collection_id = collection.collection_id
+
+    layout.separator()
+
+
 def draw_model_info(layout, model, context):
     ui_model_props = layout.box().column(align=True)
 
     row = ui_model_props.row()
     row.label(text="{}".format(model.title), icon='OBJECT_DATA')
     row.operator("wm.icosa_view", text="", icon='LINKED').asset_id = model.asset_id
-    
+
     ui_model_props.label(text='{}'.format(model.author), icon='ARMATURE_DATA')
 
     if model.license:
@@ -1409,6 +1478,100 @@ def parse_results(r, *args, **kwargs):
         icosa_props.icosa_api.prev_results_url = None
 
 
+def parse_collection_results(r, *args, **kwargs):
+    """Parse results when browsing collections (not collection contents)"""
+    ongoingSearches.discard(r.url)
+
+    icosa_props = get_icosa_props()
+    json_data = r.json()
+
+    if 'current' in icosa_props.search_results:
+        icosa_props.search_results['current'].clear()
+        del icosa_props.search_results['current']
+
+    icosa_props.search_results['current'] = OrderedDict()
+
+    # Parse collections list
+    for result in list(json_data.get('collections', [])):
+        # Dirty fix to avoid parsing obsolete data
+        if 'current' not in icosa_props.search_results:
+            return
+
+        collection = IcosaCollection(result)
+        if collection.collection_id:
+            icosa_props.search_results['current'][collection.collection_id] = collection
+
+            # Request collection thumbnail if available
+            if collection.image_url and collection.thumbnail_path:
+                if not os.path.exists(collection.thumbnail_path):
+                    thread = ThumbnailCollector(collection.image_url, f"collection_{collection.collection_id}")
+                    thread.start()
+                elif f"collection_{collection.collection_id}" not in icosa_props.custom_icons:
+                    icosa_props.custom_icons.load(
+                        f"collection_{collection.collection_id}",
+                        collection.thumbnail_path,
+                        'IMAGE'
+                    )
+
+    # Handle pagination for collections
+    if 'nextPageToken' in json_data and json_data['nextPageToken']:
+        current_url = r.url
+        parsed_url = urllib.parse.urlparse(current_url)
+        query_params = urllib.parse.parse_qs(parsed_url.query)
+        query_params.pop('pageToken', None)
+        url_without_page_token = urllib.parse.urlunparse(
+            parsed_url._replace(query=urllib.parse.urlencode(query_params, doseq=True)))
+        next_page = int(json_data['nextPageToken'])
+        icosa_props.icosa_api.next_results_url = f"{url_without_page_token}&pageToken={next_page}"
+        icosa_props.icosa_api.prev_results_url = f"{url_without_page_token}&pageToken={next_page - 1}"
+    else:
+        icosa_props.icosa_api.next_results_url = None
+        icosa_props.icosa_api.prev_results_url = None
+
+
+def parse_collection_detail(r, *args, **kwargs):
+    """Parse results when viewing a specific collection's assets"""
+    ongoingSearches.discard(r.url)
+
+    icosa_props = get_icosa_props()
+    json_data = r.json()
+
+    if 'current' in icosa_props.search_results:
+        icosa_props.search_results['current'].clear()
+        del icosa_props.search_results['current']
+
+    icosa_props.search_results['current'] = OrderedDict()
+
+    # Store collection info
+    collection = IcosaCollection(json_data)
+    icosa_props.current_collection_id = collection.collection_id
+    icosa_props.current_collection_name = collection.name
+    icosa_props.browsing_collection = True
+
+    # Parse assets within the collection
+    for asset_data in collection.assets:
+        if 'current' not in icosa_props.search_results:
+            return
+
+        asset_id = asset_data.asset_id
+        icosa_props.search_results['current'][asset_id] = asset_data
+
+        if not os.path.exists(os.path.join(Config.ICOSA_THUMB_DIR, asset_id) + '.png'):
+            # Note: asset_data is an IcosaModel, which doesn't have thumbnail directly
+            # We would need to request it from the API or it should be in the original json
+            pass
+        elif asset_id not in icosa_props.custom_icons:
+            icosa_props.custom_icons.load(
+                asset_id,
+                os.path.join(Config.ICOSA_THUMB_DIR, "{}.png".format(asset_id)),
+                'IMAGE'
+            )
+
+    # Collections don't typically have pagination for assets within them
+    icosa_props.icosa_api.next_results_url = None
+    icosa_props.icosa_api.prev_results_url = None
+
+
 class ThumbnailCollector(threading.Thread):
     def __init__(self, url, asset_id):
         self.url = url
@@ -1762,20 +1925,21 @@ class IcosaBrowse(View3DPanel, bpy.types.Panel):
             ro.prop(props, "query")
             ro.operator("wm.icosa_search", text="", icon='VIEWZOOM')
 
-            # Display a collapsible box for filters
-            col = layout.box().column(align=True)
-            col.enabled = True
-            row = col.row()
-            row.prop(props, "expanded_filters", icon="TRIA_DOWN" if props.expanded_filters else "TRIA_RIGHT", icon_only=True, emboss=False)
-            row.label(text="Search filters")
-            if props.expanded_filters:
-                col.separator()
-                col.prop(props, "categories")
-                col.prop(props, "sort_by")
-                col.prop(props, "face_count")
+            # Display a collapsible box for filters (not shown for collection browsing)
+            if prop.search_domain not in ("COLLECTIONS", "OWN_COLLECTIONS"):
+                col = layout.box().column(align=True)
+                col.enabled = True
                 row = col.row()
-                row.prop(props, "curated")
-                row.prop(props, "include_tiltbrush")
+                row.prop(props, "expanded_filters", icon="TRIA_DOWN" if props.expanded_filters else "TRIA_RIGHT", icon_only=True, emboss=False)
+                row.label(text="Search filters")
+                if props.expanded_filters:
+                    col.separator()
+                    col.prop(props, "categories")
+                    col.prop(props, "sort_by")
+                    col.prop(props, "face_count")
+                    row = col.row()
+                    row.prop(props, "curated")
+                    row.prop(props, "include_tiltbrush")
 
         pprops = get_icosa_props()
 
@@ -1786,6 +1950,13 @@ class IcosaBrowse(View3DPanel, bpy.types.Panel):
         col = layout.box().column(align=True)
 
         if not props.manualImportBoolean:
+
+            # Show back button if browsing a collection
+            if props.browsing_collection:
+                back_row = col.row()
+                back_row.operator("wm.icosa_back_to_collections", text="Back to Collections", icon='BACK')
+                col.separator()
+                col.label(text=f"Collection: {props.current_collection_name}", icon='OUTLINER_COLLECTION')
 
             #results = layout.column(align=True)
             col.label(text=self.label)
@@ -1811,28 +1982,42 @@ class IcosaBrowse(View3DPanel, bpy.types.Panel):
                 self.label = 'No results'
                 return
             else:
-                self.label = "Search results"
+                if props.browsing_collection:
+                    self.label = "Assets in collection"
+                elif props.search_domain in ("COLLECTIONS", "OWN_COLLECTIONS"):
+                    self.label = "Collections"
+                else:
+                    self.label = "Search results"
 
             if "current" in props.search_results:
 
                 if bpy.context.window_manager.result_previews not in props.search_results['current']:
                     return
 
-                model = props.search_results['current'][bpy.context.window_manager.result_previews]
+                item = props.search_results['current'][bpy.context.window_manager.result_previews]
 
-                if not model:
+                if not item:
                     return
 
-                if self.asset_id != model.asset_id:
-                    self.asset_id = model.asset_id
+                # Handle both collections and models
+                if isinstance(item, IcosaCollection):
+                    # It's a collection
+                    if self.asset_id != item.collection_id:
+                        self.asset_id = item.collection_id
 
-                    if not model.info_requested:
-                        # TODO
-                        # props.icosa_api.request_model_info(model.asset_id)
-                        model.info_requested = True
+                    draw_collection_info(col, item, context)
+                else:
+                    # It's a model
+                    if self.asset_id != item.asset_id:
+                        self.asset_id = item.asset_id
 
-                draw_model_info(col, model, context)
-                draw_import_button(col, model, context)
+                        if not item.info_requested:
+                            # TODO
+                            # props.icosa_api.request_model_info(item.asset_id)
+                            item.info_requested = True
+
+                    draw_model_info(col, item, context)
+                    draw_import_button(col, item, context)
         else:
             asset_id = ""
             if "icosa.gallery" in props.manualImportPath:
@@ -1984,6 +2169,34 @@ class IcosaModel:
         self.url_expires = None
 
 
+class IcosaCollection:
+    def __init__(self, json_data):
+        self.name = str(json_data['name'])
+        self.description = json_data.get('description', '')
+        self.collection_id = json_data['url'].split('/')[-1] if 'url' in json_data else None
+        self.url = json_data.get('url', '')
+        self.visibility = json_data.get('visibility', 'PUBLIC')
+        self.image_url = json_data.get('imageUrl', None)
+        self.create_time = json_data.get('createTime', None)
+        self.update_time = json_data.get('updateTime', None)
+        self.assets = []
+
+        # Process assets if included in response
+        if 'assets' in json_data and json_data['assets']:
+            for asset_data in json_data['assets']:
+                try:
+                    model = IcosaModel(asset_data)
+                    self.assets.append(model)
+                except Exception as e:
+                    print(f"Error parsing asset in collection: {e}")
+
+        # Generate thumbnail path
+        if self.collection_id:
+            self.thumbnail_path = os.path.join(Config.ICOSA_THUMB_DIR, 'collection_{}.png'.format(self.collection_id))
+        else:
+            self.thumbnail_path = None
+
+
 def ShowMessage(icon="INFO", title="Info", message="Information"):
     def draw(self, context):
         self.layout.label(text=message)
@@ -2041,8 +2254,19 @@ class IcosaSearch(bpy.types.Operator):
         icosa_props = get_icosa_props()
         icosa_props.icosa_api.prev_results_url = None
         icosa_props.icosa_api.next_results_url = None
-        final_query = build_search_request(icosa_props.query, icosa_props.curated, icosa_props.include_tiltbrush, icosa_props.face_count, icosa_props.categories, icosa_props.sort_by)
-        icosa_props.icosa_api.search(final_query, parse_results)
+        icosa_props.browsing_collection = False  # Reset collection browsing state
+        icosa_props.current_collection_id = ""
+        icosa_props.current_collection_name = ""
+
+        # Use appropriate parser based on search domain
+        if icosa_props.search_domain in ("COLLECTIONS", "OWN_COLLECTIONS"):
+            # Searching for collections
+            final_query = build_search_request(icosa_props.query, False, False, 'ANY', 'ALL', icosa_props.sort_by)
+            icosa_props.icosa_api.search(final_query, parse_collection_results)
+        else:
+            # Searching for assets
+            final_query = build_search_request(icosa_props.query, icosa_props.curated, icosa_props.include_tiltbrush, icosa_props.face_count, icosa_props.categories, icosa_props.sort_by)
+            icosa_props.icosa_api.search(final_query, parse_results)
         return {'FINISHED'}
 
 
@@ -2072,6 +2296,35 @@ class IcosaSearchPreviousResults(bpy.types.Operator):
         icosa_api = get_icosa_props().icosa_api
         icosa_api.search_cursor(icosa_api.prev_results_url, parse_results)
         return {'FINISHED'}
+
+class IcosaBrowseCollection(bpy.types.Operator):
+    """Browse assets within a collection"""
+    bl_idname = "wm.icosa_browse_collection"
+    bl_label = "Browse Collection"
+    bl_options = {'INTERNAL'}
+
+    collection_id: bpy.props.StringProperty(name="collectionId")
+
+    def execute(self, context):
+        clear_search()
+        icosa_props = get_icosa_props()
+        icosa_props.icosa_api.prev_results_url = None
+        icosa_props.icosa_api.next_results_url = None
+        icosa_props.icosa_api.browse_collection(self.collection_id, parse_collection_detail)
+        return {'FINISHED'}
+
+
+class IcosaBackToCollections(bpy.types.Operator):
+    """Go back to browsing collections"""
+    bl_idname = "wm.icosa_back_to_collections"
+    bl_label = "Back to Collections"
+    bl_options = {'INTERNAL'}
+
+    def execute(self, context):
+        # Trigger a new search to go back to collections list
+        bpy.ops.wm.icosa_search('EXEC_DEFAULT')
+        return {'FINISHED'}
+
 
 class IcosaCreateAccount(bpy.types.Operator):
     """Create an account on icosa.gallery"""
@@ -2537,6 +2790,8 @@ classes = (
     IcosaSearch,
     IcosaSearchPreviousResults,
     IcosaSearchNextResults,
+    IcosaBrowseCollection,
+    IcosaBackToCollections,
     ImportModalOperator,
     ViewOnIcosaGallery,
     IcosaDownloadModel,
