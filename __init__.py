@@ -1934,19 +1934,30 @@ class IcosaModel:
         def is_obj(f) -> bool:
             return f["formatType"] == "OBJ" or f["formatType"] == "OBJ_NGON"
 
-        valid_formats = []
+        # Separate formats into preferred and non-preferred
+        preferred_formats = []
+        non_preferred_formats = []
         for fmt in json_data["formats"]:
-            # TODO Allow selecting the format by role or "preferred" type
-            # Hacky logic because Blocks gltfs don't have a proper mesh hierarchy
-            if (is_blocks and is_obj(fmt)) or (not is_blocks and is_gltf(fmt)):
-                valid_formats.append(fmt)
+            if fmt.get("isPreferredForDownload", False):
+                preferred_formats.append(fmt)
+            else:
+                non_preferred_formats.append(fmt)
+
+        # Try preferred formats first, fall back to non-preferred
+        formats_to_try = [preferred_formats, non_preferred_formats]
+
+        valid_formats = []
+        for format_list in formats_to_try:
+            for fmt in format_list:
+                # Hacky logic because Blocks gltfs don't have a proper mesh hierarchy
+                if (is_blocks and is_obj(fmt)) or (not is_blocks and is_gltf(fmt)):
+                    valid_formats.append(fmt)
+            # If we found valid formats in this list (preferred or non-preferred), use them
+            if valid_formats:
+                break
+
         # Now pick the best format available based on role
         best_format = valid_formats[0]
-        for fmt in valid_formats:
-            if is_blocks: # Prefer non-trianglulated obj
-                if fmt["formatType"] == "OBJ_NGON":
-                    best_format = fmt
-                    break
 
         if "zip_archive_url" in best_format:
             # TODO Remove this kludge after https://github.com/icosa-foundation/icosa-gallery/issues/164 is resolved

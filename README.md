@@ -7,6 +7,7 @@
 * [Installation](#installation)
 * [Login](#login)
 * [Import from Icosa Gallery](#import-a-model-from-icosa-gallery)
+* [Open Brush material replacement](#open-brush-material-replacement)
 * [Export to Icosa Gallery](#export-a-model-to-icosa-gallery)
 * [Known issues](#known-issues)
 * [Report an issue](#report-an-issue)
@@ -60,6 +61,14 @@ Clicking the **Search Results** thumbnail allows to navigate through the search 
 If this fits your usecase better, you can also select the "Import from url" option to import a downloadable model through its full url, formatted as "https://icosa.gallery/view/XXXXX":
 
 [//]: # (<p align="center"><img style="max-width:100%" src="https://user-images.githubusercontent.com/52042414/158480653-568f6a91-bcd4-4009-b927-4d5ffc400658.png"></p>)
+
+<br>
+
+## Open Brush material replacement (WORK IN PROGRESS)
+
+Open Brush/Tilt Brush sketches published on Icosa Gallery often make use of materials that do not map well to Blender PBR materials. We aim to provide close matches where possible - however currently this work is incomplete.
+
+The material swap runs immediately after you import a sketch. Each GLB material name is matched against known Open Brush brush IDs (see `name_mapping.py`), and replaced with the corresponding material  from the bundled library.
 
 <br>
 
