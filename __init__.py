@@ -1095,9 +1095,12 @@ def draw_import_button(layout, model, context):
     import_ops = layout.row()
     icosa_props = get_icosa_props()
 
-    import_ops.enabled = icosa_props.icosa_api.is_user_logged() and bpy.context.mode == 'OBJECT'
-    if not icosa_props.icosa_api.is_user_logged():
-        downloadlabel = 'Log in to download models'
+    # Only require login for user-specific assets (OWN or LIKED domains)
+    requires_login = icosa_props.search_domain in ("OWN", "LIKED")
+    import_ops.enabled = (not requires_login or icosa_props.icosa_api.is_user_logged()) and bpy.context.mode == 'OBJECT'
+
+    if requires_login and not icosa_props.icosa_api.is_user_logged():
+        downloadlabel = 'Log in to download your models'
     elif bpy.context.mode != 'OBJECT':
         downloadlabel = "Import is available only in object mode"
     else:
