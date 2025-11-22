@@ -1774,8 +1774,11 @@ class ImportModalOperator(bpy.types.Operator):
         return {'FINISHED'}
 
     def modal(self, context, event):
-        if bpy.context.scene.render.engine not in ["CYCLES", "BLENDER_EEVEE_NEXT"]:
-            bpy.context.scene.render.engine = "BLENDER_EEVEE_NEXT"
+        if bpy.context.scene.render.engine not in ["CYCLES", "BLENDER_EEVEE_NEXT", "BLENDER_EEVEE"]:
+            try:
+                bpy.context.scene.render.engine = "BLENDER_EEVEE_NEXT"
+            except TypeError:
+                bpy.context.scene.render.engine = "BLENDER_EEVEE"
         try:
             old_objects = [o.name for o in bpy.data.objects]  # Get the current objects in order to find the new node hierarchy
 
