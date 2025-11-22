@@ -110,6 +110,7 @@ class Config:
     ICOSA_REPORT_URL = f'{ICOSA_URL}/contact'
 
     ICOSA_API = 'https://api.icosa.gallery/v1'
+    # API Documentation: https://api.icosa.gallery/v1/openapi.json
 
     ICOSA_MODEL = f'{ICOSA_API}/assets'
     ICOSA_UPLOAD = f'{ICOSA_API}/users/me/assets'
@@ -553,6 +554,39 @@ class IcosaApi:
             searchthr = GetRequestThread(url, search_cb, self.headers)
             searchthr.start()
 
+    def create_collection(self, name, description, visibility, callback):
+        """Create a new collection"""
+        url = Config.BASE_COLLECTIONS_OWN
+        data = {
+            'name': name,
+            'description': description,
+            'visibility': visibility
+        }
+        headers = self.headers.copy()
+        headers['Content-Type'] = 'application/json'
+        thread = PostRequestThread(url, data, callback, headers)
+        thread.start()
+
+    def add_asset_to_collection(self, collection_id, asset_id, callback):
+        """Add an asset to a collection using PATCH"""
+        url = f"{Config.BASE_COLLECTIONS_OWN}/{collection_id}"
+
+        # PATCH with asset_url array (just asset IDs, not full URLs)
+        data = {
+            'asset_url': [asset_id]
+        }
+
+        headers = self.headers.copy()
+        headers['Content-Type'] = 'application/json'
+        thread = PatchRequestThread(url, data, callback, headers)
+        thread.start()
+
+    def fetch_user_collections(self, callback):
+        """Fetch user's collections for dropdown"""
+        url = Config.BASE_COLLECTIONS_OWN
+        thread = GetRequestThread(url, callback, self.headers)
+        thread.start()
+
     def write_model_info(self, title, author, author_url, _license, asset_id):
         try:
             downloadHistory = getattr(_get_addon_preferences(), 'downloadHistory', "")
@@ -920,6 +954,38 @@ class IcosaBrowserProps(bpy.types.PropertyGroup):
         default=""
     )
 
+    # Collection creation properties
+    new_collection_name: StringProperty(
+        name="Name",
+        description="Name of the new collection",
+        default="",
+        maxlen=100
+    )
+    new_collection_description: StringProperty(
+        name="Description",
+        description="Description of the new collection",
+        default="",
+        maxlen=500
+    )
+    new_collection_visibility: EnumProperty(
+        name="Visibility",
+        items=[
+            ('PUBLIC', 'Public', 'Collection is visible to everyone'),
+            ('UNLISTED', 'Unlisted', 'Collection is accessible via link only'),
+            ('PRIVATE', 'Private', 'Collection is only visible to you')
+        ],
+        description="Who can view this collection",
+        default='PUBLIC'
+    )
+
+    # Collection management
+    user_collections = {}  # Dictionary to store user's collections for dropdown
+    selected_collection_for_asset: StringProperty(
+        name="Collection",
+        description="Collection to add the asset to",
+        default=""
+    )
+
 
 def list_current_results(self, context):
     icosa_props = get_icosa_props()
@@ -966,6 +1032,31 @@ def list_current_results(self, context):
     return preview_collection['thumbnails']
 
 
+def draw_create_collection_form(layout, context):
+    """Draw UI for creating a new collection"""
+    icosa_props = get_icosa_props()
+
+    # Only show if user is logged in and viewing own collections
+    if not icosa_props.icosa_api.is_user_logged():
+        return
+
+    if icosa_props.search_domain != "OWN_COLLECTIONS":
+        return
+
+    create_box = layout.box().column(align=True)
+    create_box.label(text="Create New Collection", icon='ADD')
+
+    create_box.prop(icosa_props, "new_collection_name")
+    create_box.prop(icosa_props, "new_collection_description")
+    create_box.prop(icosa_props, "new_collection_visibility")
+
+    create_button = create_box.row()
+    create_button.scale_y = 1.5
+    create_button.operator("wm.icosa_create_collection", text="Create Collection", icon='OUTLINER_COLLECTION')
+
+    layout.separator()
+
+
 def draw_collection_info(layout, collection, context):
     ui_collection_props = layout.box().column(align=True)
 
@@ -1010,9 +1101,12 @@ def draw_import_button(layout, model, context):
     import_ops = layout.row()
     icosa_props = get_icosa_props()
 
-    import_ops.enabled = icosa_props.icosa_api.is_user_logged() and bpy.context.mode == 'OBJECT'
-    if not icosa_props.icosa_api.is_user_logged():
-        downloadlabel = 'Log in to download models'
+    # Only require login for user-specific assets (OWN or LIKED domains)
+    requires_login = icosa_props.search_domain in ("OWN", "LIKED")
+    import_ops.enabled = (not requires_login or icosa_props.icosa_api.is_user_logged()) and bpy.context.mode == 'OBJECT'
+
+    if requires_login and not icosa_props.icosa_api.is_user_logged():
+        downloadlabel = 'Log in to download your models'
     elif bpy.context.mode != 'OBJECT':
         downloadlabel = "Import is available only in object mode"
     else:
@@ -1025,6 +1119,37 @@ def draw_import_button(layout, model, context):
     download_icon = 'IMPORT' if import_ops.enabled else 'INFO'
     import_ops.scale_y = 2.0
     import_ops.operator("wm.icosa_download", icon=download_icon, text=downloadlabel, translate=False, emboss=True).asset_id = model.asset_id
+
+
+def draw_add_to_collection_button(layout, model, context):
+    """Draw UI for adding asset to collection"""
+    icosa_props = get_icosa_props()
+
+    # Only show if user is logged in
+    if not icosa_props.icosa_api.is_user_logged():
+        return
+
+    # Fetch user collections if not already loaded
+    if not icosa_props.user_collections:
+        icosa_props.icosa_api.fetch_user_collections(parse_user_collections_for_dropdown)
+
+    # Show add to collection UI
+    collection_box = layout.box().column(align=True)
+    collection_box.label(text="Add to Collection", icon='OUTLINER_COLLECTION')
+
+    # Add "Create New Collection" button at the top
+    create_row = collection_box.row()
+    create_row.operator("wm.icosa_create_collection_with_asset", text="[New Collection]", icon='ADD').asset_id = model.asset_id
+
+    # Show existing collections
+    if icosa_props.user_collections:
+        for collection_id, collection in icosa_props.user_collections.items():
+            row = collection_box.row()
+            op = row.operator("wm.icosa_add_asset_to_collection", text=collection.name, icon='COLLECTION_COLOR_01')
+            op.collection_id = collection_id
+            op.asset_id = model.asset_id
+
+    layout.separator()
 
 
 def set_log(log):
@@ -1557,9 +1682,9 @@ def parse_collection_detail(r, *args, **kwargs):
         icosa_props.search_results['current'][asset_id] = asset_data
 
         if not os.path.exists(os.path.join(Config.ICOSA_THUMB_DIR, asset_id) + '.png'):
-            # Note: asset_data is an IcosaModel, which doesn't have thumbnail directly
-            # We would need to request it from the API or it should be in the original json
-            pass
+            # Request thumbnail if we have the thumbnail info
+            if asset_data.thumbnail:
+                icosa_props.icosa_api.request_thumbnail(asset_data.thumbnail, asset_id)
         elif asset_id not in icosa_props.custom_icons:
             icosa_props.custom_icons.load(
                 asset_id,
@@ -1570,6 +1695,24 @@ def parse_collection_detail(r, *args, **kwargs):
     # Collections don't typically have pagination for assets within them
     icosa_props.icosa_api.next_results_url = None
     icosa_props.icosa_api.prev_results_url = None
+
+
+def parse_user_collections_for_dropdown(r, *args, **kwargs):
+    """Parse user collections for the 'Add to Collection' dropdown"""
+    if r.status_code != 200:
+        return
+
+    icosa_props = get_icosa_props()
+    json_data = r.json()
+
+    # Clear and rebuild user_collections
+    icosa_props.user_collections.clear()
+
+    # Parse collections list
+    for result in list(json_data.get('collections', [])):
+        collection = IcosaCollection(result)
+        if collection.collection_id:
+            icosa_props.user_collections[collection.collection_id] = collection
 
 
 class ThumbnailCollector(threading.Thread):
@@ -1730,8 +1873,11 @@ class ImportModalOperator(bpy.types.Operator):
         return {'FINISHED'}
 
     def modal(self, context, event):
-        if bpy.context.scene.render.engine not in ["CYCLES", "BLENDER_EEVEE_NEXT"]:
-            bpy.context.scene.render.engine = "BLENDER_EEVEE_NEXT"
+        if bpy.context.scene.render.engine not in ["CYCLES", "BLENDER_EEVEE_NEXT", "BLENDER_EEVEE"]:
+            try:
+                bpy.context.scene.render.engine = "BLENDER_EEVEE_NEXT"
+            except TypeError:
+                bpy.context.scene.render.engine = "BLENDER_EEVEE"
         try:
             old_objects = [o.name for o in bpy.data.objects]  # Get the current objects in order to find the new node hierarchy
 
@@ -1798,6 +1944,42 @@ class GetRequestThread(threading.Thread):
 
     def run(self):
         requests_get(self.url, headers=self.headers, hooks={'response': self.callback})
+
+
+class PostRequestThread(threading.Thread):
+    def __init__(self, url, data, callback, headers={}):
+        self.url = url
+        self.data = data
+        self.callback = callback
+        self.headers = headers
+        threading.Thread.__init__(self)
+
+    def run(self):
+        requests.post(self.url, json=self.data, headers=self.headers, hooks={'response': self.callback})
+
+
+class PutRequestThread(threading.Thread):
+    def __init__(self, url, data, callback, headers={}):
+        self.url = url
+        self.data = data
+        self.callback = callback
+        self.headers = headers
+        threading.Thread.__init__(self)
+
+    def run(self):
+        requests.put(self.url, json=self.data, headers=self.headers, hooks={'response': self.callback})
+
+
+class PatchRequestThread(threading.Thread):
+    def __init__(self, url, data, callback, headers={}):
+        self.url = url
+        self.data = data
+        self.callback = callback
+        self.headers = headers
+        threading.Thread.__init__(self)
+
+    def run(self):
+        requests.patch(self.url, json=self.data, headers=self.headers, hooks={'response': self.callback})
 
 
 class View3DPanel:
@@ -1947,6 +2129,10 @@ class IcosaBrowse(View3DPanel, bpy.types.Panel):
 
         props = get_icosa_props()
 
+        # Show create collection form when viewing own collections
+        if props.search_domain == "OWN_COLLECTIONS" and not props.browsing_collection:
+            draw_create_collection_form(layout, context)
+
         col = layout.box().column(align=True)
 
         if not props.manualImportBoolean:
@@ -2018,6 +2204,7 @@ class IcosaBrowse(View3DPanel, bpy.types.Panel):
 
                     draw_model_info(col, item, context)
                     draw_import_button(col, item, context)
+                    draw_add_to_collection_button(col, item, context)
         else:
             asset_id = ""
             if "icosa.gallery" in props.manualImportPath:
@@ -2108,6 +2295,7 @@ class IcosaModel:
         self.zip_archive_url = None
         self.resource_urls = []
         self.thumbnail_path = os.path.join(Config.ICOSA_THUMB_DIR, '{}.png'.format(self.asset_id))
+        self.thumbnail = json_data.get('thumbnail', None)  # Store thumbnail info from API
 
         is_blocks = False
         for fmt in json_data["formats"]:
@@ -2324,6 +2512,223 @@ class IcosaBackToCollections(bpy.types.Operator):
         # Trigger a new search to go back to collections list
         bpy.ops.wm.icosa_search('EXEC_DEFAULT')
         return {'FINISHED'}
+
+
+class IcosaCreateCollection(bpy.types.Operator):
+    """Create a new collection"""
+    bl_idname = "wm.icosa_create_collection"
+    bl_label = "Create Collection"
+    bl_options = {'INTERNAL'}
+
+    def execute(self, context):
+        icosa_props = get_icosa_props()
+
+        # Validate inputs
+        if not icosa_props.new_collection_name:
+            ShowMessage("ERROR", "Collection name required", "Please enter a name for the collection")
+            return {'CANCELLED'}
+
+        # Create the collection
+        icosa_props.icosa_api.create_collection(
+            icosa_props.new_collection_name,
+            icosa_props.new_collection_description,
+            icosa_props.new_collection_visibility,
+            self.handle_create_collection
+        )
+
+        return {'FINISHED'}
+
+    def handle_create_collection(self, r, *args, **kwargs):
+        if r.status_code == 200 or r.status_code == 201:
+            icosa_props = get_icosa_props()
+            json_data = r.json()
+            collection_name = json_data.get('name', 'Unknown')
+
+            print(f"Collection '{collection_name}' was created successfully")
+
+            # Clear the form
+            icosa_props.new_collection_name = ""
+            icosa_props.new_collection_description = ""
+            icosa_props.new_collection_visibility = 'PUBLIC'
+
+            # Schedule refresh and success message on main thread
+            def refresh_and_notify():
+                icosa_props = get_icosa_props()
+                if icosa_props.search_domain in ("COLLECTIONS", "OWN_COLLECTIONS"):
+                    bpy.ops.wm.icosa_search('EXEC_DEFAULT')
+                ShowMessage("INFO", "Success", f"Collection '{collection_name}' was created successfully")
+                return None  # Don't repeat the timer
+
+            bpy.app.timers.register(refresh_and_notify, first_interval=0.1)
+        else:
+            error_msg = r.text
+            try:
+                json_data = r.json()
+                error_msg = json_data.get('error', {}).get('message', r.text)
+            except:
+                pass
+            print(f"Failed to create collection: {r.status_code} - {error_msg}")
+
+            # Schedule error message on main thread
+            def show_error():
+                ShowMessage("ERROR", "Failed to create collection", f"{r.status_code} - {error_msg}")
+                return None  # Don't repeat the timer
+
+            bpy.app.timers.register(show_error, first_interval=0.1)
+
+
+class IcosaAddAssetToCollection(bpy.types.Operator):
+    """Add the current asset to a collection"""
+    bl_idname = "wm.icosa_add_asset_to_collection"
+    bl_label = "Add to Collection"
+    bl_options = {'INTERNAL'}
+
+    collection_id: bpy.props.StringProperty(name="collectionId")
+    asset_id: bpy.props.StringProperty(name="assetId")
+
+    def execute(self, context):
+        icosa_props = get_icosa_props()
+
+        if not self.collection_id or not self.asset_id:
+            ShowMessage("ERROR", "Invalid parameters", "Collection ID and Asset ID are required")
+            return {'CANCELLED'}
+
+        # Add the asset to the collection
+        icosa_props.icosa_api.add_asset_to_collection(
+            self.collection_id,
+            self.asset_id,
+            self.handle_add_asset
+        )
+
+        return {'FINISHED'}
+
+    def handle_add_asset(self, r, *args, **kwargs):
+        if r.status_code == 200 or r.status_code == 201:
+            print("Asset was added to the collection successfully")
+
+            # Schedule success message on main thread
+            def show_success():
+                ShowMessage("INFO", "Success", "Asset was added to the collection successfully")
+                return None  # Don't repeat the timer
+
+            bpy.app.timers.register(show_success, first_interval=0.1)
+        else:
+            error_msg = r.text
+            try:
+                json_data = r.json()
+                error_msg = json_data.get('error', {}).get('message', r.text)
+            except:
+                pass
+            print(f"Failed to add asset to collection: {r.status_code} - {error_msg}")
+
+            # Schedule error message on main thread
+            def show_error():
+                ShowMessage("ERROR", "Failed to add asset", f"{r.status_code} - {error_msg}")
+                return None  # Don't repeat the timer
+
+            bpy.app.timers.register(show_error, first_interval=0.1)
+
+
+class IcosaCreateCollectionWithAsset(bpy.types.Operator):
+    """Create a new collection and add this asset to it"""
+    bl_idname = "wm.icosa_create_collection_with_asset"
+    bl_label = "Create Collection & Add Asset"
+    bl_options = {'INTERNAL'}
+
+    asset_id: bpy.props.StringProperty(name="assetId")
+
+    # Collection properties for the dialog
+    collection_name: bpy.props.StringProperty(
+        name="Name",
+        description="Name of the new collection",
+        default="",
+        maxlen=100
+    )
+    collection_description: bpy.props.StringProperty(
+        name="Description",
+        description="Description of the new collection",
+        default="",
+        maxlen=500
+    )
+    collection_visibility: bpy.props.EnumProperty(
+        name="Visibility",
+        items=[
+            ('PUBLIC', 'Public', 'Collection is visible to everyone'),
+            ('UNLISTED', 'Unlisted', 'Collection is accessible via link only'),
+            ('PRIVATE', 'Private', 'Collection is only visible to you')
+        ],
+        description="Who can view this collection",
+        default='PUBLIC'
+    )
+
+    def invoke(self, context, event):
+        wm = context.window_manager
+        return wm.invoke_props_dialog(self, width=400)
+
+    def draw(self, context):
+        layout = self.layout
+        layout.prop(self, "collection_name")
+        layout.prop(self, "collection_description")
+        layout.prop(self, "collection_visibility")
+
+    def execute(self, context):
+        icosa_props = get_icosa_props()
+
+        # Validate inputs
+        if not self.collection_name:
+            ShowMessage("ERROR", "Collection name required", "Please enter a name for the collection")
+            return {'CANCELLED'}
+
+        if not self.asset_id:
+            ShowMessage("ERROR", "Invalid asset", "Asset ID is required")
+            return {'CANCELLED'}
+
+        # Create the collection with the asset
+        url = Config.BASE_COLLECTIONS_OWN
+        data = {
+            'name': self.collection_name,
+            'description': self.collection_description,
+            'visibility': self.collection_visibility,
+            'asset_url': [self.asset_id]
+        }
+        headers = icosa_props.icosa_api.headers.copy()
+        headers['Content-Type'] = 'application/json'
+        thread = PostRequestThread(url, data, self.handle_create_collection_with_asset, headers)
+        thread.start()
+
+        return {'FINISHED'}
+
+    def handle_create_collection_with_asset(self, r, *args, **kwargs):
+        if r.status_code == 200 or r.status_code == 201:
+            json_data = r.json()
+            collection_name = json_data.get('name', 'Unknown')
+
+            print(f"Collection '{collection_name}' was created with asset successfully")
+
+            # Schedule success message on main thread
+            def show_success():
+                ShowMessage("INFO", "Success", f"Collection '{collection_name}' was created and asset was added")
+                # Refresh user collections cache
+                icosa_props = get_icosa_props()
+                icosa_props.icosa_api.fetch_user_collections(parse_user_collections_for_dropdown)
+                return None  # Don't repeat the timer
+
+            bpy.app.timers.register(show_success, first_interval=0.1)
+        else:
+            error_msg = r.text
+            try:
+                json_data = r.json()
+                error_msg = json_data.get('error', {}).get('message', r.text)
+            except:
+                pass
+            print(f"Failed to create collection with asset: {r.status_code} - {error_msg}")
+
+            # Schedule error message on main thread
+            def show_error():
+                ShowMessage("ERROR", "Failed to create collection", f"{r.status_code} - {error_msg}")
+                return None  # Don't repeat the timer
+
+            bpy.app.timers.register(show_error, first_interval=0.1)
 
 
 class IcosaCreateAccount(bpy.types.Operator):
@@ -2792,6 +3197,9 @@ classes = (
     IcosaSearchNextResults,
     IcosaBrowseCollection,
     IcosaBackToCollections,
+    IcosaCreateCollection,
+    IcosaAddAssetToCollection,
+    IcosaCreateCollectionWithAsset,
     ImportModalOperator,
     ViewOnIcosaGallery,
     IcosaDownloadModel,
