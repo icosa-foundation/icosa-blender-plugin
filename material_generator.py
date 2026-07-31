@@ -4,9 +4,11 @@ Uses metadata from three-icosa to create Blender materials procedurally
 """
 
 import os
+import shutil
+import threading
 from pathlib import PurePosixPath
 from urllib.parse import quote
-from urllib.request import urlretrieve
+from urllib.request import urlopen
 
 import bpy
 from .brush_metadata import BRUSH_MATERIALS
@@ -17,7 +19,10 @@ TEXTURE_BASE_URL = (
     'main/brushes'
 )
 TEXTURE_CACHE_PATH = 'icosa_gallery/brush_textures'
+TEXTURE_DOWNLOAD_TIMEOUT = 10
 GENERATED_BRUSH_PROPERTY = 'icosa_generated_brush'
+_texture_downloads = set()
+_texture_downloads_lock = threading.Lock()
 
 
 # Three.js blend mode constants mapped to Blender
@@ -415,7 +420,7 @@ def create_texture_node(nodes, texture_path, x, y):
 
 
 def load_texture_image(texture_path):
-    """Download a three-icosa brush texture when needed and load it."""
+    """Load a cached texture, queuing a background download when absent."""
     relative_path = PurePosixPath(texture_path)
     if relative_path.is_absolute() or '..' in relative_path.parts:
         print(f"Invalid brush texture path: {texture_path}")
@@ -426,21 +431,48 @@ def load_texture_image(texture_path):
     cache_path = os.path.join(cache_root, *relative_path.parts)
 
     if not os.path.isfile(cache_path):
-        texture_url = f"{TEXTURE_BASE_URL}/{quote(texture_path, safe='/')}"
-        os.makedirs(os.path.dirname(cache_path), exist_ok=True)
-        try:
-            urlretrieve(texture_url, cache_path)
-        except (OSError, ValueError) as error:
-            if os.path.exists(cache_path):
-                os.remove(cache_path)
-            print(f"Could not download brush texture {texture_path}: {error}")
-            return None
+        queue_texture_download(texture_path, cache_path)
+        print(f"Brush texture queued for download: {texture_path}")
+        return None
 
     try:
         return bpy.data.images.load(cache_path, check_existing=True)
     except RuntimeError as error:
         print(f"Could not load brush texture {cache_path}: {error}")
         return None
+
+
+def queue_texture_download(texture_path, cache_path):
+    """Fetch a texture off Blender's main thread, at most once per path."""
+    with _texture_downloads_lock:
+        if cache_path in _texture_downloads:
+            return
+        _texture_downloads.add(cache_path)
+
+    texture_url = f"{TEXTURE_BASE_URL}/{quote(texture_path, safe='/')}"
+
+    def download():
+        partial_path = f"{cache_path}.part"
+        try:
+            os.makedirs(os.path.dirname(cache_path), exist_ok=True)
+            with urlopen(texture_url, timeout=TEXTURE_DOWNLOAD_TIMEOUT) as response:
+                with open(partial_path, 'wb') as output:
+                    shutil.copyfileobj(response, output)
+            os.replace(partial_path, cache_path)
+            print(f"Brush texture downloaded: {texture_path}")
+        except (OSError, ValueError) as error:
+            if os.path.exists(partial_path):
+                os.remove(partial_path)
+            print(f"Could not download brush texture {texture_path}: {error}")
+        finally:
+            with _texture_downloads_lock:
+                _texture_downloads.discard(cache_path)
+
+    threading.Thread(
+        target=download,
+        name=f"IcosaTexture-{PurePosixPath(texture_path).name}",
+        daemon=True,
+    ).start()
 
 
 def generate_material_for_brush(brush_name):
