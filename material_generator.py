@@ -117,6 +117,10 @@ def create_material_from_metadata(brush_name, metadata=None):
     # Setup textures if present
     setup_textures(mat, metadata, nodes, shader_node)
 
+    if metadata.get('blending', 0) == 2:
+        setup_additive_shader(
+            mat, metadata, nodes, shader_node, output_node)
+
     print(f"Created material: {mat_name}")
     return mat
 
@@ -210,12 +214,6 @@ def apply_material_properties(mat, metadata):
     if transparent or blending > 0:
         mat.blend_method = 'BLEND'
 
-        # Special handling for additive blending
-        if blending == 2:
-            # Additive blending in Blender
-            mat.blend_method = 'BLEND'
-            # Note: True additive would need compositor or EEVEE settings
-            # For Cycles, we can approximate with emission
     else:
         mat.blend_method = 'OPAQUE'
 
@@ -233,6 +231,46 @@ def apply_material_properties(mat, metadata):
     # This would need to be handled at render settings level
     if not depth_write:
         mat.show_transparent_back = False
+
+
+def setup_additive_shader(mat, metadata, nodes, shader_node, output_node):
+    """Build a transparent-plus-emission surface for additive blending."""
+    links = mat.node_tree.links
+
+    color_alpha = nodes.new(type='ShaderNodeMixRGB')
+    color_alpha.blend_type = 'MULTIPLY'
+    color_alpha.inputs['Fac'].default_value = 1.0
+    color_alpha.location = (0, -300)
+
+    base_links = list(shader_node.inputs['Base Color'].links)
+    if base_links:
+        links.new(base_links[0].from_socket, color_alpha.inputs[1])
+    else:
+        color_alpha.inputs[1].default_value = (
+            shader_node.inputs['Base Color'].default_value)
+
+    alpha_links = list(shader_node.inputs['Alpha'].links)
+    if alpha_links:
+        links.new(alpha_links[0].from_socket, color_alpha.inputs[2])
+    else:
+        alpha = shader_node.inputs['Alpha'].default_value
+        color_alpha.inputs[2].default_value = (alpha, alpha, alpha, alpha)
+
+    emission = nodes.new(type='ShaderNodeEmission')
+    emission.location = (250, -200)
+    emission_gain = metadata.get('uniforms', {}).get('u_EmissionGain', 1.0)
+    emission.inputs['Strength'].default_value = (
+        emission_gain if emission_gain > 0 else 1.0)
+    links.new(color_alpha.outputs['Color'], emission.inputs['Color'])
+
+    transparent = nodes.new(type='ShaderNodeBsdfTransparent')
+    transparent.location = (250, -400)
+
+    additive = nodes.new(type='ShaderNodeAddShader')
+    additive.location = (500, -250)
+    links.new(transparent.outputs[0], additive.inputs[0])
+    links.new(emission.outputs[0], additive.inputs[1])
+    links.new(additive.outputs[0], output_node.inputs['Surface'])
 
 
 def setup_textures(mat, metadata, nodes, shader_node):
