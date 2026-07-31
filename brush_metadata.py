@@ -4624,3 +4624,7 @@ BRUSH_MATERIALS = {
                   'vertexShader': 'Wireframe-2c1a6a63-6552-4d23-86d7-58f6fba8581b/Wireframe-2c1a6a63-6552-4d23-86d7-58f6fba8581b-v10.0-vertex.glsl'
                   }
 }
+
+# Open Brush exports this brush as BlocksPaper, while three-icosa retains its
+# older BlocksBasic shader directory name for the same GUID.
+BRUSH_MATERIALS['BlocksPaper'] = BRUSH_MATERIALS['BlocksBasic']
