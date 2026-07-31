@@ -115,7 +115,10 @@ def create_material_from_metadata(brush_name, metadata=None):
     apply_material_properties(mat, metadata)
 
     # Setup textures if present
-    setup_textures(mat, metadata, nodes, shader_node)
+    if not setup_textures(mat, metadata, nodes, shader_node):
+        print(f"Could not create material '{mat_name}': required texture missing")
+        bpy.data.materials.remove(mat)
+        return None
 
     if metadata.get('blending', 0) == 2:
         setup_additive_shader(
@@ -294,58 +297,62 @@ def setup_textures(mat, metadata, nodes, shader_node):
         tex_path = uniforms['u_MainTex']
         if tex_path and tex_path != 'None':
             tex_node = create_texture_node(nodes, tex_path, texture_offset_x, texture_offset_y)
-            if tex_node:
+            if tex_node is None:
+                return False
+            multiply_input(
+                nodes, links, tex_node.outputs['Color'],
+                shader_node.inputs['Base Color'],
+                (texture_offset_x + 200, texture_offset_y))
+            # Connect alpha if material is transparent
+            if metadata.get('transparent', False):
                 multiply_input(
-                    nodes, links, tex_node.outputs['Color'],
-                    shader_node.inputs['Base Color'],
-                    (texture_offset_x + 200, texture_offset_y))
-                # Connect alpha if material is transparent
-                if metadata.get('transparent', False):
-                    multiply_input(
-                        nodes, links, tex_node.outputs['Alpha'],
-                        shader_node.inputs['Alpha'],
-                        (texture_offset_x + 400, texture_offset_y),
-                        scalar=True)
-                texture_offset_y -= 300
+                    nodes, links, tex_node.outputs['Alpha'],
+                    shader_node.inputs['Alpha'],
+                    (texture_offset_x + 400, texture_offset_y),
+                    scalar=True)
+            texture_offset_y -= 300
 
     # Bump map (normal map)
     if 'u_BumpMap' in uniforms:
         tex_path = uniforms['u_BumpMap']
         if tex_path and tex_path != 'None':
             tex_node = create_texture_node(nodes, tex_path, texture_offset_x, texture_offset_y)
-            if tex_node:
-                # Create normal map node
-                normal_node = nodes.new(type='ShaderNodeNormalMap')
-                normal_node.location = (texture_offset_x + 200, texture_offset_y)
-                links.new(tex_node.outputs['Color'], normal_node.inputs['Color'])
-                links.new(normal_node.outputs['Normal'], shader_node.inputs['Normal'])
-                texture_offset_y -= 300
+            if tex_node is None:
+                return False
+            # Create normal map node
+            normal_node = nodes.new(type='ShaderNodeNormalMap')
+            normal_node.location = (texture_offset_x + 200, texture_offset_y)
+            links.new(tex_node.outputs['Color'], normal_node.inputs['Color'])
+            links.new(normal_node.outputs['Normal'], shader_node.inputs['Normal'])
+            texture_offset_y -= 300
 
     # Alpha mask
     if 'u_AlphaMask' in uniforms:
         tex_path = uniforms['u_AlphaMask']
         if tex_path and tex_path != 'None':
             tex_node = create_texture_node(nodes, tex_path, texture_offset_x, texture_offset_y)
-            if tex_node:
-                multiply_input(
-                    nodes, links, tex_node.outputs['Color'],
-                    shader_node.inputs['Alpha'],
-                    (texture_offset_x + 200, texture_offset_y),
-                    scalar=True)
-                texture_offset_y -= 300
+            if tex_node is None:
+                return False
+            multiply_input(
+                nodes, links, tex_node.outputs['Color'],
+                shader_node.inputs['Alpha'],
+                (texture_offset_x + 200, texture_offset_y),
+                scalar=True)
+            texture_offset_y -= 300
 
     # Specular texture
     if 'u_SpecTex' in uniforms:
         tex_path = uniforms['u_SpecTex']
         if tex_path and tex_path != 'None':
             tex_node = create_texture_node(nodes, tex_path, texture_offset_x, texture_offset_y)
-            if tex_node:
-                # Use as roughness map (inverted)
-                invert_node = nodes.new(type='ShaderNodeInvert')
-                invert_node.location = (texture_offset_x + 200, texture_offset_y)
-                links.new(tex_node.outputs['Color'], invert_node.inputs['Color'])
-                links.new(invert_node.outputs['Color'], shader_node.inputs['Roughness'])
-                texture_offset_y -= 300
+            if tex_node is None:
+                return False
+            # Use as roughness map (inverted)
+            invert_node = nodes.new(type='ShaderNodeInvert')
+            invert_node.location = (texture_offset_x + 200, texture_offset_y)
+            links.new(tex_node.outputs['Color'], invert_node.inputs['Color'])
+            links.new(invert_node.outputs['Color'], shader_node.inputs['Roughness'])
+            texture_offset_y -= 300
 
     if uniforms.get('u_EmissionGain', 0) > 0:
         base_color_links = shader_node.inputs['Base Color'].links
@@ -353,6 +360,8 @@ def setup_textures(mat, metadata, nodes, shader_node):
             links.new(
                 base_color_links[0].from_socket,
                 shader_node.inputs['Emission Color'])
+
+    return True
 
 
 def multiply_input(nodes, links, new_output, target_input, location,
