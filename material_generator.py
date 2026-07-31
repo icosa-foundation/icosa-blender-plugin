@@ -17,6 +17,7 @@ TEXTURE_BASE_URL = (
     'main/brushes'
 )
 TEXTURE_CACHE_PATH = 'icosa_gallery/brush_textures'
+GENERATED_BRUSH_PROPERTY = 'icosa_generated_brush'
 
 
 # Three.js blend mode constants mapped to Blender
@@ -413,13 +414,16 @@ def generate_material_for_brush(brush_name):
         print(f"Cannot generate material: No metadata for '{brush_name}'")
         return None
 
-    # Check if material already exists
-    existing = bpy.data.materials.get(brush_name)
-    if existing:
-        print(f"Material '{brush_name}' already exists, skipping generation")
-        return existing
+    for material in bpy.data.materials:
+        if material.get(GENERATED_BRUSH_PROPERTY) == brush_name:
+            print(f"Reusing generated material for '{brush_name}'")
+            return material
 
-    return create_material_from_metadata(brush_name, metadata)
+    generated_name = f"{brush_name} [generated]"
+    material = create_material_from_metadata(generated_name, metadata)
+    if material is not None:
+        material[GENERATED_BRUSH_PROPERTY] = brush_name
+    return material
 
 
 def list_available_brushes():
