@@ -133,18 +133,39 @@ def create_shader_node(mat, metadata, nodes):
         Created shader node
     """
     uniforms = metadata.get('uniforms', {})
-    blending = metadata.get('blending', 0)
-    transparent = metadata.get('transparent', False)
 
     # Most Open Brush materials use Principled BSDF as a base
     shader = nodes.new(type='ShaderNodeBsdfPrincipled')
 
-    # Apply color from uniforms if available
-    # Note: Open Brush applies color per-vertex, so base color is usually white
+    # Open Brush stores the authored stroke color in the imported color attribute.
+    uniform_color = (1.0, 1.0, 1.0, 1.0)
     if 'u_Color' in uniforms:
         color = uniforms['u_Color']
         if len(color) >= 3:
-            shader.inputs['Base Color'].default_value = (color[0], color[1], color[2], 1.0)
+            alpha = color[3] if len(color) >= 4 else 1.0
+            uniform_color = (color[0], color[1], color[2], alpha)
+
+    vertex_color = nodes.new(type='ShaderNodeVertexColor')
+    vertex_color.location = (-600, 0)
+
+    color_multiply = nodes.new(type='ShaderNodeMixRGB')
+    color_multiply.blend_type = 'MULTIPLY'
+    color_multiply.inputs['Fac'].default_value = 1.0
+    color_multiply.inputs[2].default_value = uniform_color
+    color_multiply.location = (-350, 50)
+    mat.node_tree.links.new(
+        vertex_color.outputs['Color'], color_multiply.inputs[1])
+    mat.node_tree.links.new(
+        color_multiply.outputs['Color'], shader.inputs['Base Color'])
+
+    alpha_multiply = nodes.new(type='ShaderNodeMath')
+    alpha_multiply.operation = 'MULTIPLY'
+    alpha_multiply.inputs[1].default_value = uniform_color[3]
+    alpha_multiply.location = (-350, -150)
+    mat.node_tree.links.new(
+        vertex_color.outputs['Alpha'], alpha_multiply.inputs[0])
+    mat.node_tree.links.new(
+        alpha_multiply.outputs[0], shader.inputs['Alpha'])
 
     # Apply specular/shininess
     if 'u_Shininess' in uniforms:
@@ -167,10 +188,6 @@ def create_shader_node(mat, metadata, nodes):
             if 'Base Color' in shader.inputs:
                 base_color = shader.inputs['Base Color'].default_value
                 shader.inputs['Emission Color'].default_value = base_color
-
-    # Handle transparency
-    if transparent or blending == 2:  # Additive blending
-        shader.inputs['Alpha'].default_value = 0.5  # Default, will be overridden by texture
 
     return shader
 
@@ -239,11 +256,17 @@ def setup_textures(mat, metadata, nodes, shader_node):
         if tex_path and tex_path != 'None':
             tex_node = create_texture_node(nodes, tex_path, texture_offset_x, texture_offset_y)
             if tex_node:
-                # Connect to base color
-                links.new(tex_node.outputs['Color'], shader_node.inputs['Base Color'])
+                multiply_input(
+                    nodes, links, tex_node.outputs['Color'],
+                    shader_node.inputs['Base Color'],
+                    (texture_offset_x + 200, texture_offset_y))
                 # Connect alpha if material is transparent
                 if metadata.get('transparent', False):
-                    links.new(tex_node.outputs['Alpha'], shader_node.inputs['Alpha'])
+                    multiply_input(
+                        nodes, links, tex_node.outputs['Alpha'],
+                        shader_node.inputs['Alpha'],
+                        (texture_offset_x + 400, texture_offset_y),
+                        scalar=True)
                 texture_offset_y -= 300
 
     # Bump map (normal map)
@@ -265,7 +288,11 @@ def setup_textures(mat, metadata, nodes, shader_node):
         if tex_path and tex_path != 'None':
             tex_node = create_texture_node(nodes, tex_path, texture_offset_x, texture_offset_y)
             if tex_node:
-                links.new(tex_node.outputs['Color'], shader_node.inputs['Alpha'])
+                multiply_input(
+                    nodes, links, tex_node.outputs['Color'],
+                    shader_node.inputs['Alpha'],
+                    (texture_offset_x + 200, texture_offset_y),
+                    scalar=True)
                 texture_offset_y -= 300
 
     # Specular texture
@@ -280,6 +307,39 @@ def setup_textures(mat, metadata, nodes, shader_node):
                 links.new(tex_node.outputs['Color'], invert_node.inputs['Color'])
                 links.new(invert_node.outputs['Color'], shader_node.inputs['Roughness'])
                 texture_offset_y -= 300
+
+    if uniforms.get('u_EmissionGain', 0) > 0:
+        base_color_links = shader_node.inputs['Base Color'].links
+        if base_color_links:
+            links.new(
+                base_color_links[0].from_socket,
+                shader_node.inputs['Emission Color'])
+
+
+def multiply_input(nodes, links, new_output, target_input, location,
+                   scalar=False):
+    """Multiply a socket into an input without discarding its current source."""
+    existing_links = list(target_input.links)
+    existing_output = existing_links[0].from_socket if existing_links else None
+    for link in existing_links:
+        links.remove(link)
+
+    if scalar:
+        multiply = nodes.new(type='ShaderNodeMath')
+        multiply.operation = 'MULTIPLY'
+    else:
+        multiply = nodes.new(type='ShaderNodeMixRGB')
+        multiply.blend_type = 'MULTIPLY'
+        multiply.inputs['Fac'].default_value = 1.0
+
+    multiply.location = location
+    if existing_output is not None:
+        links.new(existing_output, multiply.inputs[0 if scalar else 1])
+    else:
+        multiply.inputs[0 if scalar else 1].default_value = target_input.default_value
+    links.new(new_output, multiply.inputs[1 if scalar else 2])
+    links.new(
+        multiply.outputs[0 if scalar else 'Color'], target_input)
 
 
 def create_texture_node(nodes, texture_path, x, y):
