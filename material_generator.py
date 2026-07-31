@@ -3,8 +3,20 @@ Dynamic Blender material generator for Open Brush brushes
 Uses metadata from three-icosa to create Blender materials procedurally
 """
 
+import os
+from pathlib import PurePosixPath
+from urllib.parse import quote
+from urllib.request import urlretrieve
+
 import bpy
 from .brush_metadata import BRUSH_MATERIALS
+
+
+TEXTURE_BASE_URL = (
+    'https://raw.githubusercontent.com/icosa-foundation/three-icosa/'
+    'main/brushes'
+)
+TEXTURE_CACHE_PATH = 'icosa_gallery/brush_textures'
 
 
 # Three.js blend mode constants mapped to Blender
@@ -282,19 +294,45 @@ def create_texture_node(nodes, texture_path, x, y):
     Returns:
         Created texture node or None
     """
-    # Note: texture_path is relative to three-icosa brushes directory
-    # Format: "BrushName-GUID/BrushName-GUID-v10.0-MainTex.png"
-    # We can't load these directly without downloading them first
-    # For now, create the node but leave it without an image
+    image = load_texture_image(texture_path)
+    if image is None:
+        return None
 
     tex_node = nodes.new(type='ShaderNodeTexImage')
     tex_node.location = (x, y)
     tex_node.label = f"Texture: {texture_path}"
-
-    # TODO: Could implement texture downloading from three-icosa GitHub
-    # For now, just create placeholder node
+    tex_node.image = image
 
     return tex_node
+
+
+def load_texture_image(texture_path):
+    """Download a three-icosa brush texture when needed and load it."""
+    relative_path = PurePosixPath(texture_path)
+    if relative_path.is_absolute() or '..' in relative_path.parts:
+        print(f"Invalid brush texture path: {texture_path}")
+        return None
+
+    cache_root = bpy.utils.user_resource(
+        'DATAFILES', path=TEXTURE_CACHE_PATH, create=True)
+    cache_path = os.path.join(cache_root, *relative_path.parts)
+
+    if not os.path.isfile(cache_path):
+        texture_url = f"{TEXTURE_BASE_URL}/{quote(texture_path, safe='/')}"
+        os.makedirs(os.path.dirname(cache_path), exist_ok=True)
+        try:
+            urlretrieve(texture_url, cache_path)
+        except (OSError, ValueError) as error:
+            if os.path.exists(cache_path):
+                os.remove(cache_path)
+            print(f"Could not download brush texture {texture_path}: {error}")
+            return None
+
+    try:
+        return bpy.data.images.load(cache_path, check_existing=True)
+    except RuntimeError as error:
+        print(f"Could not load brush texture {cache_path}: {error}")
+        return None
 
 
 def generate_material_for_brush(brush_name):
